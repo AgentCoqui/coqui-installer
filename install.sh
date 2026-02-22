@@ -24,6 +24,75 @@ REQUIRED_PHP_MINOR=4
 # PHP extensions required by Coqui and php-agents
 REQUIRED_EXTENSIONS="curl mbstring pdo_sqlite xml zip"
 
+# ─── Mode flags (set via CLI arguments) ──────────────────────────────────────
+
+INSTALL_PHP=false
+INSTALL_COMPOSER=false
+INSTALL_COQUI=false
+NON_INTERACTIVE=false
+SELECTIVE_MODE=false   # true when any --install-* flag is passed
+
+# ─── Argument parsing ────────────────────────────────────────────────────────
+
+parse_args() {
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --install-php)
+                INSTALL_PHP=true; SELECTIVE_MODE=true; shift ;;
+            --install-composer)
+                INSTALL_COMPOSER=true; SELECTIVE_MODE=true; shift ;;
+            --install-coqui)
+                INSTALL_COQUI=true; SELECTIVE_MODE=true; shift ;;
+            --non-interactive)
+                NON_INTERACTIVE=true; shift ;;
+            --help|-h)
+                show_usage; exit 0 ;;
+            *)
+                error "Unknown argument: $1"
+                echo "  Run '$0 --help' for usage."
+                exit 1 ;;
+        esac
+    done
+
+    # No --install-* flags → full install (backward compatible with curl | bash)
+    if [ "$SELECTIVE_MODE" = false ]; then
+        INSTALL_PHP=true
+        INSTALL_COMPOSER=true
+        INSTALL_COQUI=true
+    fi
+}
+
+show_usage() {
+    echo "Usage: $0 [flags]"
+    echo ""
+    echo "Flags:"
+    echo "  --install-php          Install/check PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ and extensions"
+    echo "  --install-composer     Install/check Composer"
+    echo "  --install-coqui        Install/update Coqui and create symlink"
+    echo "  --non-interactive      Skip all confirmation prompts (assume yes)"
+    echo "  --help, -h             Show this help"
+    echo ""
+    echo "When no --install-* flags are given, all components are installed (full setup)."
+    echo ""
+    echo "Environment variables:"
+    echo "  COQUI_REPO             Git repo URL (default: ${COQUI_REPO})"
+    echo "  COQUI_INSTALL_DIR      Install path (default: \$HOME/.coqui)"
+    echo "  COQUI_VERSION          Git branch or tag (default: latest)"
+    echo ""
+    echo "Examples:"
+    echo "  # Full install (default)"
+    echo "  curl -fsSL https://...install.sh | bash"
+    echo ""
+    echo "  # PHP only, no prompts"
+    echo "  ./install.sh --install-php --non-interactive"
+    echo ""
+    echo "  # PHP + Composer only"
+    echo "  ./install.sh --install-php --install-composer"
+    echo ""
+    echo "  # Coqui only (user has PHP + Composer already)"
+    echo "  ./install.sh --install-coqui"
+}
+
 # ─── Output helpers ──────────────────────────────────────────────────────────
 
 BOLD="$( (tput bold 2>/dev/null) || echo '' )"
@@ -52,7 +121,12 @@ confirm() {
     local prompt="${1:-Continue?}"
     local reply
 
-    # Non-interactive — assume yes
+    # Non-interactive mode — assume yes
+    if [ "$NON_INTERACTIVE" = true ]; then
+        return 0
+    fi
+
+    # Piped input (curl | bash) — assume yes
     if [ ! -t 0 ]; then
         return 0
     fi
@@ -592,11 +666,52 @@ print_success() {
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 main() {
+    parse_args "$@"
     show_banner
 
     detect_os
     setup_sudo
 
+    # ── Selective mode: run only the requested components ──
+    if [ "$SELECTIVE_MODE" = true ]; then
+        if [ "$INSTALL_PHP" = true ]; then
+            check_php
+            check_extensions
+        fi
+
+        if [ "$INSTALL_COMPOSER" = true ]; then
+            # Composer needs PHP — verify it exists even if --install-php wasn't passed
+            if ! available php; then
+                fatal "PHP is required to install Composer. Re-run with --install-php or install PHP manually."
+            fi
+            check_composer
+        fi
+
+        if [ "$INSTALL_COQUI" = true ]; then
+            if ! available php; then
+                fatal "PHP is required to install Coqui. Re-run with --install-php or install PHP manually."
+            fi
+            if ! available composer; then
+                fatal "Composer is required to install Coqui. Re-run with --install-composer or install Composer manually."
+            fi
+            check_git
+
+            if is_installed; then
+                update_coqui
+            else
+                install_coqui
+            fi
+            setup_config
+            create_symlink
+        fi
+
+        echo ""
+        success "Done"
+        echo ""
+        return
+    fi
+
+    # ── Full install (no flags — backward compatible) ──
     if is_installed; then
         echo "  ${ARROW} Existing installation found at ${COQUI_INSTALL_DIR}"
         echo ""
