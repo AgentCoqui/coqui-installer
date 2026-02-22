@@ -24,6 +24,31 @@ bash install.sh
 - Creates a default configuration with Ollama as the local provider
 - Symlinks the `coqui` command to your PATH
 
+## Selective Install
+
+Install individual components with flags:
+
+```bash
+# PHP only (no prompts)
+./install.sh --install-php --non-interactive
+
+# PHP + Composer only
+./install.sh --install-php --install-composer
+
+# Coqui only (user has PHP + Composer already)
+./install.sh --install-coqui
+```
+
+When no `--install-*` flags are given, all components are installed (full setup, backward compatible with `curl | bash`).
+
+| Flag | Description |
+|------|-------------|
+| `--install-php` | Install/check PHP 8.4+ and required extensions |
+| `--install-composer` | Install/check Composer |
+| `--install-coqui` | Install/update Coqui, create config and symlink |
+| `--non-interactive` | Skip all confirmation prompts (assume yes) |
+| `--help`, `-h` | Show usage |
+
 ## Update
 
 Re-run the install command. The installer detects existing installations and offers to update:
