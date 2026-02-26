@@ -732,11 +732,10 @@ create_symlink() {
 
 show_banner() {
     echo ""
-    echo "  ${BOLD}${GREEN}  ___                  _  ${RESET}"
-    echo "  ${BOLD}${GREEN} / __| ___   __ _ _  _(_) ${RESET}"
-    echo "  ${BOLD}${GREEN}| (__ / _ \\ / _\` | || | | ${RESET}"
-    echo "  ${BOLD}${GREEN} \\___|\\___/ \\__, |\\_,_|_| ${RESET}"
-    echo "  ${BOLD}${GREEN}              |_|         ${RESET}"
+    echo "  ${BOLD}${GREEN}▄█████  ▄▄▄   ▄▄▄  ▄▄ ▄▄ ▄▄   █████▄  ▄▄▄ ▄▄▄▄▄▄${RESET}"
+    echo "  ${BOLD}${GREEN}██     ██▀██ ██▀██ ██ ██ ██   ██▄▄██ ██▀██  ██  ${RESET}"
+    echo "  ${BOLD}${GREEN}▀█████ ▀███▀ ▀███▀ ▀███▀ ██   ██▄▄█▀ ▀███▀  ██  ${RESET}"
+    echo "  ${BOLD}${GREEN}                ▀▀                              ${RESET}"
     echo ""
     echo "  ${BOLD}Coqui Installer${RESET}"
     echo ""

@@ -4,8 +4,18 @@ One liner for [Coqui](https://github.com/AgentCoqui/coqui) — a terminal AI age
 
 ## Install
 
+### Linux / macOS / WSL2
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.sh | bash
+```
+
+### Windows (Native)
+
+Open PowerShell as Administrator (recommended) or a regular user and run:
+
+```powershell
+Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force; Invoke-RestMethod -Uri https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.ps1 | Invoke-Expression
 ```
 
 Or download and inspect first:
@@ -14,6 +24,13 @@ Or download and inspect first:
 curl -fsSL https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.sh -o install.sh
 less install.sh    # review the script
 bash install.sh
+```
+
+**For Windows:**
+```powershell
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.ps1 -OutFile install.ps1
+Get-Content install.ps1 | more    # review the script
+.\install.ps1
 ```
 
 ## What It Does
@@ -76,7 +93,7 @@ COQUI_INSTALL_DIR=/opt/coqui bash install.sh
 
 ## Requirements
 
-- Linux or macOS (WSL2 supported)
+- Linux, macOS, or Windows 10/11
 - PHP 8.4 or later
 - Extensions: `curl`, `mbstring`, `pdo_sqlite`, `xml`, `zip`
 - Composer 2.x
@@ -85,9 +102,16 @@ COQUI_INSTALL_DIR=/opt/coqui bash install.sh
 
 ## Uninstall
 
+**Linux / macOS**
 ```bash
 rm -rf ~/.coqui
 sudo rm -f /usr/local/bin/coqui
+```
+
+**Windows**
+```powershell
+Remove-Item -Recurse -Force $HOME\.coqui
+Remove-Item -Force $env:LOCALAPPDATA\Microsoft\WindowsApps\coqui.bat
 ```
 
 ## License
