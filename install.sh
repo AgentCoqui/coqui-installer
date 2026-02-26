@@ -203,6 +203,8 @@ detect_os() {
                 PKG_MANAGER="pacman"
             elif available apk; then
                 PKG_MANAGER="apk"
+            elif available nix-env || available nix; then
+                PKG_MANAGER="nix"
             fi
             ;;
         Darwin)
@@ -210,6 +212,8 @@ detect_os() {
             DISTRO="macos"
             if available brew; then
                 PKG_MANAGER="brew"
+            elif available nix-env || available nix; then
+                PKG_MANAGER="nix"
             fi
             ;;
         *)
@@ -267,28 +271,57 @@ install_php() {
             fi
             ;;
         brew)
-            echo ""
-            echo "  Install PHP via Homebrew:"
-            echo ""
-            echo "    brew install php@${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}"
-            echo ""
-            fatal "PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ is required."
+            if confirm "Install PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR} via Homebrew?"; then
+                status "Installing PHP via Homebrew..."
+                brew install php@${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR} >/dev/null
+                brew link --force --overwrite php@${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR} >/dev/null
+                success "PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR} installed"
+            else
+                fatal "PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ is required."
+            fi
             ;;
         dnf|yum)
-            echo ""
-            echo "  Install PHP via ${PKG_MANAGER}:"
-            echo ""
-            echo "    sudo ${PKG_MANAGER} install php-cli php-curl php-mbstring php-xml php-zip php-intl php-pdo"
-            echo ""
-            fatal "PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ is required."
+            if confirm "Install PHP via ${PKG_MANAGER}?"; then
+                status "Installing PHP via ${PKG_MANAGER}..."
+                # shellcheck disable=SC2086
+                $SUDO ${PKG_MANAGER} install -y php-cli php-curl php-mbstring php-xml php-zip php-intl php-pdo >/dev/null
+                success "PHP installed"
+            else
+                fatal "PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ is required."
+            fi
             ;;
         pacman)
-            echo ""
-            echo "  Install PHP via pacman:"
-            echo ""
-            echo "    sudo pacman -S php php-sqlite php-intl"
-            echo ""
-            fatal "PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ is required."
+            if confirm "Install PHP via pacman?"; then
+                status "Installing PHP via pacman..."
+                $SUDO pacman -S --noconfirm php php-sqlite php-intl >/dev/null
+                success "PHP installed"
+            else
+                fatal "PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ is required."
+            fi
+            ;;
+        apk)
+            if confirm "Install PHP via apk?"; then
+                status "Installing PHP via apk..."
+                local phpv="${REQUIRED_PHP_MAJOR}${REQUIRED_PHP_MINOR}"
+                $SUDO apk add --no-cache php${phpv} php${phpv}-cli php${phpv}-curl php${phpv}-mbstring php${phpv}-xml php${phpv}-zip php${phpv}-intl php${phpv}-pdo_sqlite >/dev/null
+                success "PHP installed"
+            else
+                fatal "PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ is required."
+            fi
+            ;;
+        nix)
+            if confirm "Install PHP via Nix?"; then
+                status "Installing PHP via Nix..."
+                local phpv="${REQUIRED_PHP_MAJOR}${REQUIRED_PHP_MINOR}"
+                if available nix-env; then
+                    nix-env -iA nixpkgs.php${phpv} >/dev/null 2>&1 || nix-env -iA nixpkgs.php >/dev/null 2>&1
+                elif available nix; then
+                    nix profile install nixpkgs#php${phpv} >/dev/null 2>&1 || nix profile install nixpkgs#php >/dev/null 2>&1
+                fi
+                success "PHP installed"
+            else
+                fatal "PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ is required."
+            fi
             ;;
         *)
             echo ""
@@ -345,11 +378,48 @@ check_extensions() {
         else
             fatal "Required extensions missing:${missing}"
         fi
+    elif [ "$PKG_MANAGER" = "dnf" ] || [ "$PKG_MANAGER" = "yum" ]; then
+        local packages=""
+        for ext in $missing; do
+            case "$ext" in
+                pdo_sqlite) packages="${packages} php-pdo" ;;
+                *)          packages="${packages} php-${ext}" ;;
+            esac
+        done
+        if confirm "Install missing extensions via ${PKG_MANAGER}?"; then
+            status "Installing:${packages}"
+            # shellcheck disable=SC2086
+            $SUDO ${PKG_MANAGER} install -y $packages >/dev/null
+            success "Extensions installed"
+        else
+            fatal "Required extensions missing:${missing}"
+        fi
+    elif [ "$PKG_MANAGER" = "apk" ]; then
+        local phpv="${REQUIRED_PHP_MAJOR}${REQUIRED_PHP_MINOR}"
+        local packages=""
+        for ext in $missing; do
+            packages="${packages} php${phpv}-${ext}"
+        done
+        if confirm "Install missing extensions via apk?"; then
+            status "Installing:${packages}"
+            # shellcheck disable=SC2086
+            $SUDO apk add --no-cache $packages >/dev/null
+            success "Extensions installed"
+        else
+            fatal "Required extensions missing:${missing}"
+        fi
+    elif [ "$PKG_MANAGER" = "nix" ]; then
+        warn "Missing extensions:${missing}. Nix manages PHP extensions via its derivation configuration. Please ensure your Nix environment has these extensions enabled."
+        if ! confirm "Ignore missing extensions warning and continue?"; then
+             fatal "Required extensions missing:${missing}"
+        fi
     else
+        # pacman and brew generally bundle these extensions with their base php packages,
+        # or require manual edits to php.ini to enable them.
         echo ""
-        echo "  Please install the following PHP extensions:${missing}"
+        echo "  Please enable or install the following PHP extensions:${missing}"
         echo ""
-        fatal "Required extensions missing."
+        fatal "Required PHP extensions missing."
     fi
 }
 
@@ -373,7 +443,48 @@ check_git() {
             fi
             ;;
         brew)
-            fatal "git is required. Install it with: brew install git"
+            if confirm "Install git via Homebrew?"; then
+                brew install git >/dev/null
+                success "git installed"
+            else
+                fatal "git is required. Install it with: brew install git"
+            fi
+            ;;
+        dnf|yum)
+            if confirm "Install git via ${PKG_MANAGER}?"; then
+                $SUDO ${PKG_MANAGER} install -y git >/dev/null
+                success "git installed"
+            else
+                fatal "git is required."
+            fi
+            ;;
+        pacman)
+            if confirm "Install git via pacman?"; then
+                $SUDO pacman -S --noconfirm git >/dev/null
+                success "git installed"
+            else
+                fatal "git is required."
+            fi
+            ;;
+        apk)
+            if confirm "Install git via apk?"; then
+                $SUDO apk add --no-cache git >/dev/null
+                success "git installed"
+            else
+                fatal "git is required."
+            fi
+            ;;
+        nix)
+            if confirm "Install git via Nix?"; then
+                if available nix-env; then
+                    nix-env -iA nixpkgs.git >/dev/null 2>&1
+                elif available nix; then
+                    nix profile install nixpkgs#git >/dev/null 2>&1
+                fi
+                success "git installed"
+            else
+                fatal "git is required."
+            fi
             ;;
         *)
             fatal "git is required. Please install it and re-run the installer."

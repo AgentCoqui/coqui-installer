@@ -18,7 +18,8 @@ bash install.sh
 
 ## What It Does
 
-- Checks for PHP 8.4+ and required extensions (offers to install on Debian/Ubuntu)
+- Detects your OS and package manager (`apt`, `brew`, `dnf`, `yum`, `pacman`, `apk`, `nix`)
+- Checks for PHP 8.4+ and required extensions (offers to install if missing)
 - Installs Composer if not present
 - Clones Coqui to `~/.coqui` and installs dependencies
 - Creates a default configuration with Ollama as the local provider
