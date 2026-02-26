@@ -39,6 +39,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$script:FatalError = $false
 
 # ─── Configuration (override via environment variables) ──────────────────────
 
@@ -93,7 +94,10 @@ function Write-Err {
 function Write-Fatal {
     param([string]$Message)
     Write-Err $Message
-    exit 1
+    # Use throw instead of exit 1 so that when the script is run via
+    # Invoke-Expression (piped from Invoke-RestMethod), it terminates the
+    # script block rather than killing the entire parent PowerShell session.
+    throw $Message
 }
 
 # ─── Utility functions ───────────────────────────────────────────────────────
@@ -160,10 +164,26 @@ function Check-Php {
         return
     }
 
-    $PhpVersionOutput = php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;'
-    $parts = $PhpVersionOutput.Split('.')
+    # Run php in a try/catch so a broken PHP install (found in PATH but not
+    # actually executable) surfaces a clear warning instead of an abrupt
+    # session exit caused by $ErrorActionPreference = "Stop".
+    $PhpVersionOutput = ""
+    try {
+        $PhpVersionOutput = (php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;' 2>&1)
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn "PHP returned exit code $LASTEXITCODE when queried for version."
+            Install-Php
+            return
+        }
+    } catch {
+        Write-Warn "PHP is in PATH but could not be executed: $_"
+        Install-Php
+        return
+    }
+
+    $parts = ($PhpVersionOutput -as [string]).Split('.')
     if ($parts.Length -lt 2) {
-        Write-Warn "Could not determine PHP version."
+        Write-Warn "Could not determine PHP version (got: '$PhpVersionOutput')."
         Install-Php
         return
     }
@@ -623,4 +643,10 @@ function Main {
     }
 }
 
-Main
+try {
+    Main
+} catch {
+    # Write-Fatal throws to avoid killing the host session when the script is
+    # piped via Invoke-Expression. Catch it here and exit with a non-zero code.
+    exit 1
+}
