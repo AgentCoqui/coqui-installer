@@ -732,21 +732,24 @@ function Install-Service {
     $ServiceBat = Join-Path $COQUI_INSTALL_DIR "bin\coqui-api-service.bat"
     $CoquiScript = Join-Path $COQUI_INSTALL_DIR "bin\coqui"
 
-    $BatchContent = @"
+    $BatchContent = @'
 @echo off
-cd /d "$COQUI_INSTALL_DIR"
-php "$CoquiScript" api --host 0.0.0.0 --port $SERVICE_PORT
-"@
+cd /d "__INSTALL_DIR__"
+php "__COQUI_SCRIPT__" api --host 0.0.0.0 --port __PORT__
+'@
+    $BatchContent = $BatchContent.Replace('__INSTALL_DIR__', $COQUI_INSTALL_DIR)
+    $BatchContent = $BatchContent.Replace('__COQUI_SCRIPT__', $CoquiScript)
+    $BatchContent = $BatchContent.Replace('__PORT__', $SERVICE_PORT)
     Set-Content -Path $ServiceBat -Value $BatchContent
     Write-Success "Service wrapper created: $ServiceBat"
 
     # Create the XML task definition for restart-on-failure support
-    $TaskXml = @"
+    $TaskXml = @'
 <?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Description>Coqui AI Agent - API Server</Description>
-    <URI>\$SERVICE_TASK_NAME</URI>
+    <URI>__TASK_NAME__</URI>
   </RegistrationInfo>
   <Triggers>
     <LogonTrigger>
@@ -767,12 +770,15 @@ php "$CoquiScript" api --host 0.0.0.0 --port $SERVICE_PORT
   </Settings>
   <Actions>
     <Exec>
-      <Command>$ServiceBat</Command>
-      <WorkingDirectory>$COQUI_INSTALL_DIR</WorkingDirectory>
+      <Command>__SERVICE_BAT__</Command>
+      <WorkingDirectory>__WORKING_DIR__</WorkingDirectory>
     </Exec>
   </Actions>
 </Task>
-"@
+'@
+    $TaskXml = $TaskXml.Replace('__TASK_NAME__', $SERVICE_TASK_NAME)
+    $TaskXml = $TaskXml.Replace('__SERVICE_BAT__', $ServiceBat)
+    $TaskXml = $TaskXml.Replace('__WORKING_DIR__', $COQUI_INSTALL_DIR)
 
     $TaskXmlFile = Join-Path $env:TEMP "coqui-task.xml"
     Set-Content -Path $TaskXmlFile -Value $TaskXml -Encoding Unicode
