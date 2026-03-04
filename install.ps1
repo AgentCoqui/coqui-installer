@@ -26,7 +26,7 @@ $REQUIRED_PHP_MAJOR = 8
 $REQUIRED_PHP_MINOR = 4
 
 # PHP extensions required by Coqui and php-agents
-$REQUIRED_EXTENSIONS = @("curl", "mbstring", "pdo_sqlite", "xml", "zip")
+$REQUIRED_EXTENSIONS = @("curl", "mbstring", "openssl", "pdo_sqlite", "xml", "zip")
 
 # ─── Output helpers ──────────────────────────────────────────────────────────
 
@@ -352,14 +352,17 @@ function Install-Composer {
     $BinDir = Get-UserBinDir
 
     try {
-        & php $TempScript --quiet --install-dir=$BinDir 2>&1 | Out-Null
+        $ComposerOutput = & php $TempScript --quiet --install-dir=$BinDir 2>&1
         if ($LASTEXITCODE -ne 0) {
+            if ($ComposerOutput) {
+                Write-Err ($ComposerOutput | Out-String).Trim()
+            }
             Remove-Item -Path $TempScript -Force -ErrorAction SilentlyContinue
             Write-Fatal "Composer installation failed."
         }
     } catch {
         Remove-Item -Path $TempScript -Force -ErrorAction SilentlyContinue
-        Write-Fatal "Composer installation failed."
+        throw
     }
 
     Remove-Item -Path $TempScript -Force -ErrorAction SilentlyContinue
@@ -395,12 +398,15 @@ function Install-Coqui {
     $CloneArgs += $COQUI_INSTALL_DIR
 
     try {
-        & git $CloneArgs 2>&1 | Out-Null
+        $CloneOutput = & git $CloneArgs 2>&1
         if ($LASTEXITCODE -ne 0) {
+            if ($CloneOutput) {
+                Write-Err ($CloneOutput | Out-String).Trim()
+            }
             Write-Fatal "Failed to clone Coqui repository."
         }
     } catch {
-        Write-Fatal "Failed to clone Coqui repository."
+        throw
     }
 
     Write-Success "Coqui cloned"
@@ -445,12 +451,15 @@ function Run-ComposerInstall {
 
     Set-Location $COQUI_INSTALL_DIR
     try {
-        & composer install --no-dev --optimize-autoloader --no-interaction --quiet 2>&1 | Out-Null
+        $InstallOutput = & composer install --no-dev --optimize-autoloader --no-interaction 2>&1
         if ($LASTEXITCODE -ne 0) {
+            if ($InstallOutput) {
+                Write-Err ($InstallOutput | Out-String).Trim()
+            }
             Write-Fatal "Composer install failed."
         }
     } catch {
-        Write-Fatal "Composer install failed."
+        throw
     }
 
     Write-Success "Dependencies installed"
