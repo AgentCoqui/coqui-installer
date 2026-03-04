@@ -8,6 +8,9 @@
 #
 # Install with:
 #   curl -fsSL https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.sh | bash
+#
+# Windows:
+#   irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.ps1 | iex
 
 set -eu
 
@@ -22,7 +25,7 @@ REQUIRED_PHP_MAJOR=8
 REQUIRED_PHP_MINOR=4
 
 # PHP extensions required by Coqui and php-agents
-REQUIRED_EXTENSIONS="curl mbstring pdo_sqlite xml zip"
+REQUIRED_EXTENSIONS="curl mbstring openssl pdo_sqlite xml zip"
 
 # ─── Mode flags (set via CLI arguments) ──────────────────────────────────────
 
@@ -732,11 +735,10 @@ create_symlink() {
 
 show_banner() {
     echo ""
-    echo "  ${BOLD}${GREEN}  ___                  _  ${RESET}"
-    echo "  ${BOLD}${GREEN} / __| ___   __ _ _  _(_) ${RESET}"
-    echo "  ${BOLD}${GREEN}| (__ / _ \\ / _\` | || | | ${RESET}"
-    echo "  ${BOLD}${GREEN} \\___|\\___/ \\__, |\\_,_|_| ${RESET}"
-    echo "  ${BOLD}${GREEN}              |_|         ${RESET}"
+    echo "  ${BOLD}${GREEN}▄█████  ▄▄▄   ▄▄▄  ▄▄ ▄▄ ▄▄   █████▄  ▄▄▄ ▄▄▄▄▄▄${RESET}"
+    echo "  ${BOLD}${GREEN}██     ██▀██ ██▀██ ██ ██ ██   ██▄▄██ ██▀██  ██  ${RESET}"
+    echo "  ${BOLD}${GREEN}▀█████ ▀███▀ ▀███▀ ▀███▀ ██   ██▄▄█▀ ▀███▀  ██  ${RESET}"
+    echo "  ${BOLD}${GREEN}                ▀▀                              ${RESET}"
     echo ""
     echo "  ${BOLD}Coqui Installer${RESET}"
     echo ""
