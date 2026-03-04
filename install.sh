@@ -8,6 +8,9 @@
 #
 # Install with:
 #   curl -fsSL https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.sh | bash
+#
+# Windows:
+#   irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.ps1 | iex
 
 set -eu
 

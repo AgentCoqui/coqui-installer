@@ -3,43 +3,17 @@
     Coqui Installer for Windows
     https://github.com/AgentCoqui/coqui
 
-    Terminal AI agent with multi-model orchestration, persistent sessions,
-    and runtime extensibility via Composer.
-
 .DESCRIPTION
     Installs PHP, Composer, Git, and Coqui on a Windows system.
     Creates a coqui.bat wrapper in your user path for easy execution.
 
 .EXAMPLE
-    Set-ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
-    Invoke-RestMethod -Uri https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.ps1 | Invoke-Expression
-
-.PARAMETER InstallPhp
-    Install/check PHP 8.4+ and extensions
-
-.PARAMETER InstallComposer
-    Install/check Composer
-
-.PARAMETER InstallCoqui
-    Install/update Coqui and create alias
-
-.PARAMETER NonInteractive
-    Skip all confirmation prompts (assume yes)
-
-.PARAMETER Help
-    Show this help message
+    irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.ps1 | iex
 #>
-[CmdletBinding()]
-param(
-    [switch]$InstallPhp,
-    [switch]$InstallComposer,
-    [switch]$InstallCoqui,
-    [switch]$NonInteractive,
-    [switch]$Help
-)
 
-$ErrorActionPreference = "Stop"
-$script:FatalError = $false
+$ErrorActionPreference = "Continue"
+$ProgressPreference = "SilentlyContinue"
+$script:HadError = $false
 
 # ─── Configuration (override via environment variables) ──────────────────────
 
@@ -53,21 +27,6 @@ $REQUIRED_PHP_MINOR = 4
 
 # PHP extensions required by Coqui and php-agents
 $REQUIRED_EXTENSIONS = @("curl", "mbstring", "pdo_sqlite", "xml", "zip")
-
-# ─── Mode flags ──────────────────────────────────────────────────────────────
-
-$SELECTIVE_MODE = $InstallPhp -or $InstallComposer -or $InstallCoqui
-
-if (-not $SELECTIVE_MODE) {
-    $InstallPhp = $true
-    $InstallComposer = $true
-    $InstallCoqui = $true
-}
-
-if ($Help) {
-    Get-Help $PSCommandPath -Detailed
-    exit 0
-}
 
 # ─── Output helpers ──────────────────────────────────────────────────────────
 
@@ -94,63 +53,75 @@ function Write-Err {
 function Write-Fatal {
     param([string]$Message)
     Write-Err $Message
-    # Use throw instead of exit 1 so that when the script is run via
-    # Invoke-Expression (piped from Invoke-RestMethod), it terminates the
-    # script block rather than killing the entire parent PowerShell session.
-    throw $Message
+    $script:HadError = $true
+    throw "CoquiInstallerError: $Message"
 }
 
 # ─── Utility functions ───────────────────────────────────────────────────────
 
 function Test-Command {
     param([string]$CommandName)
-    try {
-        $null = Get-Command $CommandName -ErrorAction Stop
-        return $true
-    } catch {
-        return $false
-    }
+    $null = Get-Command $CommandName -ErrorAction SilentlyContinue
+    return $?
 }
 
-function Confirm-Action {
-    param([string]$PromptMessage = "Continue?")
-    
-    if ($NonInteractive) {
-        return $true
-    }
-
-    $Title = "Confirmation Required"
-    $Choices = [System.Management.Automation.Host.ChoiceDescription[]]@(
-        (New-Object System.Management.Automation.Host.ChoiceDescription "&Yes", "Continue with the action."),
-        (New-Object System.Management.Automation.Host.ChoiceDescription "&No", "Cancel the action.")
-    )
-
-    $Decision = $Host.UI.PromptForChoice($Title, "  $([char]0x25B8) $PromptMessage", $Choices, 0)
-    return $Decision -eq 0
+function Refresh-Path {
+    # Reload PATH from the registry so newly installed tools are visible
+    $MachinePath = [Environment]::GetEnvironmentVariable("PATH", "Machine")
+    $UserPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+    $env:PATH = "$MachinePath;$UserPath"
 }
 
 function Get-UserBinDir {
-    # Check if LocalAppData\Microsoft\WindowsApps exists (usually in PATH for Windows 10/11)
-    $WindowsAppsDir = Join-Path $env:LOCALAPPDATA "Microsoft\WindowsApps"
-    if (Test-Path $WindowsAppsDir) {
-        return $WindowsAppsDir
-    }
-    
-    # Fallback to AppData\Local\Programs\Coqui\bin
+    # Prefer AppData\Local\Programs\Coqui\bin (clean, dedicated location)
     $CoquiBinDir = Join-Path $env:LOCALAPPDATA "Programs\Coqui\bin"
     if (-not (Test-Path $CoquiBinDir)) {
         New-Item -ItemType Directory -Force -Path $CoquiBinDir | Out-Null
     }
-    
+
     # Check if it's in PATH
     $UserPath = [Environment]::GetEnvironmentVariable("PATH", "User")
     if (-not ($UserPath -like "*$CoquiBinDir*")) {
         [Environment]::SetEnvironmentVariable("PATH", "$UserPath;$CoquiBinDir", "User")
         $env:PATH = "$env:PATH;$CoquiBinDir"
-        Write-Warn "Added $CoquiBinDir to your PATH. You may need to restart your terminal later."
+        Write-Status "Added $CoquiBinDir to your PATH"
     }
 
     return $CoquiBinDir
+}
+
+# ─── PHP install ─────────────────────────────────────────────────────────────
+
+function Install-Php {
+    if (-not (Test-Command "winget")) {
+        Write-Host ""
+        Write-Host "  PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ is required but winget is not available."
+        Write-Host "  Please install PHP manually from: https://windows.php.net/download/"
+        Write-Host ""
+        Write-Fatal "PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ is required."
+    }
+
+    Write-Status "Installing PHP via winget..."
+    & winget install --id PHP.PHP.${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR} --accept-source-agreements --accept-package-agreements --silent 2>&1 | Out-Null
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ""
+        Write-Host "  winget could not install PHP automatically."
+        Write-Host "  Please install PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ manually:"
+        Write-Host "    https://windows.php.net/download/"
+        Write-Host ""
+        Write-Fatal "PHP installation failed."
+    }
+
+    Refresh-Path
+
+    if (-not (Test-Command "php")) {
+        Write-Warn "PHP was installed but is not yet in PATH."
+        Write-Host "  Please restart your terminal and re-run the installer."
+        Write-Fatal "PHP not found in PATH after install."
+    }
+
+    Write-Success "PHP installed via winget"
 }
 
 # ─── PHP checks ──────────────────────────────────────────────────────────────
@@ -159,60 +130,48 @@ function Check-Php {
     Write-Status "Checking PHP..."
 
     if (-not (Test-Command "php")) {
-        Write-Warn "PHP is not installed or not in PATH."
+        Write-Warn "PHP is not installed."
         Install-Php
-        return
     }
 
-    # Run php in a try/catch so a broken PHP install (found in PATH but not
-    # actually executable) surfaces a clear warning instead of an abrupt
-    # session exit caused by $ErrorActionPreference = "Stop".
-    $PhpVersionOutput = ""
+    # Get PHP version — use -ErrorAction SilentlyContinue to avoid stderr killing the script
+    $PhpVersionOutput = $null
     try {
-        $PhpVersionOutput = (php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;' 2>&1)
-        if ($LASTEXITCODE -ne 0) {
-            Write-Warn "PHP returned exit code $LASTEXITCODE when queried for version."
-            Install-Php
-            return
-        }
+        $PhpVersionOutput = & php -r "echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;" 2>$null
     } catch {
-        Write-Warn "PHP is in PATH but could not be executed: $_"
-        Install-Php
-        return
+        # Ignore — handled below
+    }
+
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($PhpVersionOutput)) {
+        Write-Warn "PHP is in PATH but could not be executed properly."
+        Write-Host "  Please reinstall PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ from https://windows.php.net/download/"
+        Write-Fatal "PHP is not working correctly."
     }
 
     $parts = ($PhpVersionOutput -as [string]).Split('.')
     if ($parts.Length -lt 2) {
-        Write-Warn "Could not determine PHP version (got: '$PhpVersionOutput')."
-        Install-Php
-        return
+        Write-Fatal "Could not determine PHP version (got: '$PhpVersionOutput')."
     }
 
     $PhpMajor = [int]$parts[0]
     $PhpMinor = [int]$parts[1]
 
     if ($PhpMajor -lt $REQUIRED_PHP_MAJOR -or ($PhpMajor -eq $REQUIRED_PHP_MAJOR -and $PhpMinor -lt $REQUIRED_PHP_MINOR)) {
-        Write-Warn "PHP $PhpVersionOutput found, but PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ is required."
+        Write-Warn "PHP $PhpVersionOutput found, but ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ is required."
         Install-Php
-        return
+
+        # Re-check after install
+        $PhpVersionOutput = & php -r "echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;" 2>$null
+        $parts = ($PhpVersionOutput -as [string]).Split('.')
+        $PhpMajor = [int]$parts[0]
+        $PhpMinor = [int]$parts[1]
+
+        if ($PhpMajor -lt $REQUIRED_PHP_MAJOR -or ($PhpMajor -eq $REQUIRED_PHP_MAJOR -and $PhpMinor -lt $REQUIRED_PHP_MINOR)) {
+            Write-Fatal "PHP version is still too old after install attempt."
+        }
     }
 
     Write-Success "PHP $PhpVersionOutput"
-}
-
-function Install-Php {
-    Write-Host ""
-    Write-Host "  Please install PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ with the required extensions."
-    Write-Host "  See: https://windows.php.net/download/"
-    Write-Host ""
-    if (Test-Command "winget") {
-        Write-Host "  You can try installing PHP via winget:"
-        Write-Host "    winget install --id PHP.PHP --version ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR} --source winget"
-        Write-Host ""
-        Write-Host "  Make sure to add the PHP directory to your system PATH!"
-    }
-    Write-Host ""
-    Write-Fatal ("PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ is required.")
 }
 
 # ─── Extension checks ────────────────────────────────────────────────────────
@@ -221,10 +180,11 @@ function Check-Extensions {
     Write-Status "Checking PHP extensions..."
 
     $Missing = @()
+    $Loaded = @()
     try {
-        $Loaded = php -m 2>$null
+        $Loaded = & php -m 2>$null
     } catch {
-        Write-Fatal "Failed to execute 'php -m'."
+        Write-Fatal "Failed to query PHP extensions."
     }
 
     foreach ($Ext in $REQUIRED_EXTENSIONS) {
@@ -239,44 +199,124 @@ function Check-Extensions {
         return
     }
 
+    # Try to auto-enable missing extensions in php.ini
     $MissingList = $Missing -join ", "
     Write-Warn "Missing PHP extensions: $MissingList"
+
+    $PhpIniPath = $null
+    try {
+        $PhpIniPath = (& php -r "echo php_ini_loaded_file();" 2>$null)
+    } catch {}
+
+    if ([string]::IsNullOrWhiteSpace($PhpIniPath) -or -not (Test-Path $PhpIniPath)) {
+        # No php.ini loaded — try to find and copy php.ini-development
+        try {
+            $PhpDir = Split-Path (Get-Command php -ErrorAction SilentlyContinue).Source
+            $PhpIniDev = Join-Path $PhpDir "php.ini-development"
+            $PhpIniTarget = Join-Path $PhpDir "php.ini"
+
+            if ((Test-Path $PhpIniDev) -and -not (Test-Path $PhpIniTarget)) {
+                Write-Status "Creating php.ini from php.ini-development..."
+                Copy-Item $PhpIniDev $PhpIniTarget
+                $PhpIniPath = $PhpIniTarget
+            }
+        } catch {}
+    }
+
+    if ($PhpIniPath -and (Test-Path $PhpIniPath)) {
+        Write-Status "Enabling missing extensions in $PhpIniPath..."
+        $IniContent = Get-Content -Path $PhpIniPath -Raw
+
+        # Ensure extension_dir is set
+        if ($IniContent -match ';\s*extension_dir\s*=\s*"ext"') {
+            $IniContent = $IniContent -replace ';\s*(extension_dir\s*=\s*"ext")', '$1'
+        }
+
+        foreach ($Ext in $Missing) {
+            # Uncomment the extension line if it exists
+            $Pattern = ";\s*extension=$Ext"
+            if ($IniContent -match $Pattern) {
+                $IniContent = $IniContent -replace $Pattern, "extension=$Ext"
+            } else {
+                # Append if not present at all
+                $IniContent += "`nextension=$Ext"
+            }
+        }
+
+        Set-Content -Path $PhpIniPath -Value $IniContent
+
+        # Re-check extensions
+        $Loaded = & php -m 2>$null
+        $StillMissing = @()
+        foreach ($Ext in $Missing) {
+            $match = $Loaded | Where-Object { $_ -match "^$Ext$" }
+            if (-not $match) {
+                $StillMissing += $Ext
+            }
+        }
+
+        if ($StillMissing.Count -eq 0) {
+            Write-Success "Extensions enabled successfully"
+            return
+        }
+
+        $MissingList = $StillMissing -join ", "
+        Write-Warn "Could not enable: $MissingList"
+    }
+
     Write-Host ""
-    Write-Host "  Please locate your php.ini file (run 'php --ini' to find it)."
-    Write-Host "  Open it and uncomment (remove the semicolon before) the following lines:"
+    Write-Host "  Some extensions could not be enabled automatically."
+    Write-Host "  Run 'php --ini' to locate your php.ini, then uncomment:"
     foreach ($Ext in $Missing) {
         Write-Host "    extension=$Ext"
     }
     Write-Host ""
-    Write-Host "  Also ensure 'extension_dir = `"ext`"' is uncommented and points to the right path."
-    Write-Host ""
-    
-    if (-not (Confirm-Action "Ignore missing extensions warning and continue?")) {
-        Write-Fatal "Required PHP extensions missing: $MissingList."
-    }
+    Write-Warn "Continuing with missing extensions (some features may not work)."
 }
 
 # ─── Git check ───────────────────────────────────────────────────────────────
 
 function Check-Git {
-    Write-Status "Checking git..."
+    Write-Status "Checking Git..."
 
     if (Test-Command "git") {
-        $GitVersion = (git --version).Split(' ')[2]
-        Write-Success "git $GitVersion"
+        try {
+            $GitVersion = (& git --version 2>$null).Split(' ')[2]
+            Write-Success "Git $GitVersion"
+        } catch {
+            Write-Success "Git found"
+        }
         return
     }
 
-    Write-Host ""
-    Write-Host "  Git is required but missing."
-    if (Test-Command "winget") {
-        Write-Host "  You can try installing Git via winget:"
-        Write-Host "    winget install -e --id Git.Git"
-    } else {
-        Write-Host "  Download it from: https://git-scm.com/download/win"
+    if (-not (Test-Command "winget")) {
+        Write-Host ""
+        Write-Host "  Git is required. Please install it from:"
+        Write-Host "    https://git-scm.com/download/win"
+        Write-Host ""
+        Write-Fatal "Git is required."
     }
-    Write-Host ""
-    Write-Fatal "git is required. Please install it and re-run the installer."
+
+    Write-Status "Installing Git via winget..."
+    & winget install --id Git.Git --accept-source-agreements --accept-package-agreements --silent 2>&1 | Out-Null
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host ""
+        Write-Host "  winget could not install Git automatically."
+        Write-Host "  Please install Git manually: https://git-scm.com/download/win"
+        Write-Host ""
+        Write-Fatal "Git installation failed."
+    }
+
+    Refresh-Path
+
+    if (-not (Test-Command "git")) {
+        Write-Warn "Git was installed but is not yet in PATH."
+        Write-Host "  Please restart your terminal and re-run the installer."
+        Write-Fatal "Git not found in PATH after install."
+    }
+
+    Write-Success "Git installed"
 }
 
 # ─── Composer check ──────────────────────────────────────────────────────────
@@ -285,17 +325,16 @@ function Check-Composer {
     Write-Status "Checking Composer..."
 
     if (Test-Command "composer") {
-        # Strip newline/carriage returns from string
-        $ComposerVersion = (((composer --version 2>$null) -split ' ')[2]).Trim()
-        Write-Success "Composer $ComposerVersion"
+        try {
+            $ComposerVersion = (((& composer --version 2>$null) -split ' ')[2]).Trim()
+            Write-Success "Composer $ComposerVersion"
+        } catch {
+            Write-Success "Composer found"
+        }
         return
     }
 
-    if (Confirm-Action "Composer not found. Install it now?") {
-        Install-Composer
-    } else {
-        Write-Fatal "Composer is required."
-    }
+    Install-Composer
 }
 
 function Install-Composer {
@@ -309,28 +348,30 @@ function Install-Composer {
     }
 
     Write-Status "Installing Composer..."
-    
+
     $BinDir = Get-UserBinDir
-    $ComposerPhar = Join-Path $BinDir "composer.phar"
-    
+
     try {
-        php $TempScript --quiet --install-dir=$BinDir
+        & php $TempScript --quiet --install-dir=$BinDir 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Remove-Item -Path $TempScript -Force -ErrorAction SilentlyContinue
+            Write-Fatal "Composer installation failed."
+        }
     } catch {
-        Remove-Item -Path $TempScript -Force -ErrorAction Ignore
-        Write-Fatal "Composer installation script failed."
+        Remove-Item -Path $TempScript -Force -ErrorAction SilentlyContinue
+        Write-Fatal "Composer installation failed."
     }
-    
-    Remove-Item -Path $TempScript -Force -ErrorAction Ignore
+
+    Remove-Item -Path $TempScript -Force -ErrorAction SilentlyContinue
 
     # Create composer.bat wrapper
     $ComposerBat = Join-Path $BinDir "composer.bat"
     Set-Content -Path $ComposerBat -Value "@php `"%~dp0composer.phar`" %*"
 
-    Write-Success "Composer installed to $BinDir"
-    
-    # Validate the installation is now in PATH for this session
+    Write-Success "Composer installed"
+
+    # Make composer available for the rest of this session
     if (-not (Test-Command "composer")) {
-        # Temporarily alias composer to the bat file for the rest of this powershell session
         Set-Alias composer $ComposerBat -Scope Global
     }
 }
@@ -349,12 +390,11 @@ function Install-Coqui {
     if ($COQUI_VERSION) {
         $CloneArgs = @("clone", "--branch", $COQUI_VERSION, "--depth", "1")
     }
-    
+
     $CloneArgs += $COQUI_REPO
     $CloneArgs += $COQUI_INSTALL_DIR
 
     try {
-        # Run git directly with standard output silenced
         & git $CloneArgs 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) {
             Write-Fatal "Failed to clone Coqui repository."
@@ -372,15 +412,15 @@ function Update-Coqui {
     Write-Status "Checking for updates..."
 
     Set-Location $COQUI_INSTALL_DIR
-    
+
     & git fetch --quiet 2>&1 | Out-Null
 
-    $LocalHead = (git rev-parse HEAD).Trim()
+    $LocalHead = (& git rev-parse HEAD 2>$null).Trim()
     $RemoteHead = ""
     try {
-        $RemoteHead = (git rev-parse '@{u}' 2>$null).Trim()
+        $RemoteHead = (& git rev-parse '@{u}' 2>$null).Trim()
     } catch {}
-    
+
     if ([string]::IsNullOrWhiteSpace($RemoteHead)) {
         $RemoteHead = $LocalHead
     }
@@ -391,17 +431,13 @@ function Update-Coqui {
         return
     }
 
-    if (Confirm-Action "A new version of Coqui is available. Update now?") {
-        Write-Status "Updating Coqui..."
-        & git pull --ff-only --quiet 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) {
-             Write-Fatal "Failed to update. Try a clean install by clearing $COQUI_INSTALL_DIR."
-        }
-        Write-Success "Coqui updated"
-        Run-ComposerInstall
-    } else {
-        Write-Success "Update skipped"
+    Write-Status "Updating Coqui..."
+    & git pull --ff-only --quiet 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fatal "Failed to update. Try removing $COQUI_INSTALL_DIR and re-running."
     }
+    Write-Success "Coqui updated"
+    Run-ComposerInstall
 }
 
 function Run-ComposerInstall {
@@ -414,7 +450,7 @@ function Run-ComposerInstall {
             Write-Fatal "Composer install failed."
         }
     } catch {
-       Write-Fatal "Composer install failed."
+        Write-Fatal "Composer install failed."
     }
 
     Write-Success "Dependencies installed"
@@ -504,16 +540,16 @@ function Setup-Config {
     Write-Success "Default configuration created (Ollama local provider)"
 }
 
-# ─── Symlink Wrapper ─────────────────────────────────────────────────────────
+# ─── Wrapper ─────────────────────────────────────────────────────────────────
 
 function Create-SymlinkWrapper {
     $BinDir = Get-UserBinDir
     $CoquiPhpscript = Join-Path $COQUI_INSTALL_DIR "bin\coqui"
-    
+
     # Create coqui.bat to wrap the PHP proxy
     $CoquiBat = Join-Path $BinDir "coqui.bat"
 
-    Write-Status "Creating executable wrapper in $BinDir..."
+    Write-Status "Creating executable wrapper..."
 
     $WrapperContent = "@php `"$CoquiPhpscript`" %*"
     Set-Content -Path $CoquiBat -Value $WrapperContent
@@ -552,7 +588,7 @@ function Print-Success {
     Write-Host ""
     Write-Host "    $COQUI_INSTALL_DIR\openclaw.json"
     Write-Host ""
-    Write-Host "  Add cloud providers (optional PowerShell):"
+    Write-Host "  Add cloud providers (optional):"
     Write-Host ""
     Write-Host "    `$env:OPENAI_API_KEY=`"sk-...`""
     Write-Host "    `$env:ANTHROPIC_API_KEY=`"sk-ant-...`""
@@ -574,45 +610,6 @@ function Main {
     $OriginalDir = Get-Location
 
     try {
-        # ── Selective mode: run only the requested components ──
-        if ($SELECTIVE_MODE) {
-            if ($InstallPhp) {
-                Check-Php
-                Check-Extensions
-            }
-
-            if ($InstallComposer) {
-                if (-not (Test-Command "php")) {
-                    Write-Fatal "PHP is required to install Composer. Install PHP manually and ensure it is in PATH."
-                }
-                Check-Composer
-            }
-
-            if ($InstallCoqui) {
-                if (-not (Test-Command "php")) {
-                    Write-Fatal "PHP is required to install Coqui."
-                }
-                if (-not (Test-Command "composer") -and -not (Test-Path $(Join-Path (Get-UserBinDir) "composer.bat"))) {
-                    Write-Fatal "Composer is required to install Coqui."
-                }
-                Check-Git
-
-                if (Test-CoquiInstalled) {
-                    Update-Coqui
-                } else {
-                    Install-Coqui
-                }
-                Setup-Config
-                Create-SymlinkWrapper
-            }
-
-            Write-Host ""
-            Write-Success "Done"
-            Write-Host ""
-            return
-        }
-
-        # ── Full install ──
         if (Test-CoquiInstalled) {
             Write-Host "  $([char]0x25B8) Existing installation found at $COQUI_INSTALL_DIR"
             Write-Host ""
@@ -643,10 +640,17 @@ function Main {
     }
 }
 
+# Run — the try/catch prevents unhandled throw from Write-Fatal from
+# propagating ugly red text. We do NOT use "exit 1" here because that
+# would kill the user's PowerShell session when run via irm | iex.
 try {
     Main
 } catch {
-    # Write-Fatal throws to avoid killing the host session when the script is
-    # piped via Invoke-Expression. Catch it here and exit with a non-zero code.
-    exit 1
+    if (-not $script:HadError) {
+        # Unexpected error (not from Write-Fatal) — show it
+        Write-Err "An unexpected error occurred: $_"
+    }
+    Write-Host ""
+    Write-Host "  Need help? https://github.com/AgentCoqui/coqui/issues"
+    Write-Host ""
 }
