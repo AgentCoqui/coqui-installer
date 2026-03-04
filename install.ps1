@@ -28,6 +28,78 @@ $REQUIRED_PHP_MINOR = 4
 # PHP extensions required by Coqui and php-agents
 $REQUIRED_EXTENSIONS = @("curl", "mbstring", "openssl", "pdo_sqlite", "xml", "zip")
 
+# ─── Mode flags ──────────────────────────────────────────────────────────────
+
+$script:INSTALL_PHP = $false
+$script:INSTALL_COMPOSER = $false
+$script:INSTALL_COQUI = $false
+$script:INSTALL_SERVICE = $false
+$script:NON_INTERACTIVE = $false
+$script:SELECTIVE_MODE = $false
+
+# ─── Service configuration ───────────────────────────────────────────────────
+
+$SERVICE_PORT = if ($env:COQUI_API_PORT) { $env:COQUI_API_PORT } else { "3300" }
+$SERVICE_TASK_NAME = "CoquiApiService"
+$script:SERVICE_INSTALLED = $false
+
+# ─── Argument parsing ────────────────────────────────────────────────────────
+
+function Parse-Args {
+    param([string[]]$Arguments)
+
+    for ($i = 0; $i -lt $Arguments.Length; $i++) {
+        switch ($Arguments[$i]) {
+            "--install-php" {
+                $script:INSTALL_PHP = $true; $script:SELECTIVE_MODE = $true
+            }
+            "--install-composer" {
+                $script:INSTALL_COMPOSER = $true; $script:SELECTIVE_MODE = $true
+            }
+            "--install-coqui" {
+                $script:INSTALL_COQUI = $true; $script:SELECTIVE_MODE = $true
+            }
+            "--install-service" {
+                $script:INSTALL_SERVICE = $true; $script:SELECTIVE_MODE = $true
+            }
+            "--non-interactive" {
+                $script:NON_INTERACTIVE = $true
+            }
+            "--help" {
+                Show-Usage; return
+            }
+            "-h" {
+                Show-Usage; return
+            }
+            default {
+                Write-Err "Unknown argument: $($Arguments[$i])"
+                Write-Host "  Run with --help for usage."
+                return
+            }
+        }
+    }
+
+    # No --install-* flags → full install (backward compatible)
+    if (-not $script:SELECTIVE_MODE) {
+        $script:INSTALL_PHP = $true
+        $script:INSTALL_COMPOSER = $true
+        $script:INSTALL_COQUI = $true
+    }
+}
+
+function Show-Usage {
+    Write-Host "Usage: install.ps1 [flags]"
+    Write-Host ""
+    Write-Host "Flags:"
+    Write-Host "  --install-php          Install/check PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ and extensions"
+    Write-Host "  --install-composer     Install/check Composer"
+    Write-Host "  --install-coqui        Install/update Coqui and create wrapper"
+    Write-Host "  --install-service      Install Coqui API as a background service"
+    Write-Host "  --non-interactive      Skip all confirmation prompts (assume yes)"
+    Write-Host "  --help, -h             Show this help"
+    Write-Host ""
+}
+
 # ─── Output helpers ──────────────────────────────────────────────────────────
 
 function Write-Status {
@@ -549,6 +621,228 @@ function Setup-Config {
     Write-Success "Default configuration created (Ollama local provider)"
 }
 
+# ─── Confirmation helper ─────────────────────────────────────────────────────
+
+function Confirm-Action {
+    param([string]$Prompt = "Continue?")
+
+    if ($script:NON_INTERACTIVE) { return $true }
+
+    # Check if running non-interactively (piped)
+    try {
+        if (-not [System.Console]::KeyAvailable -and $false) {}
+    } catch {
+        # Console not available (piped invocation) — assume yes
+        return $true
+    }
+
+    $reply = Read-Host "  $([char]0x25B8) $Prompt [Y/n]"
+    if ($reply -match '^[nN]') { return $false }
+    return $true
+}
+
+# ─── Service installation (Windows Task Scheduler) ───────────────────────────
+
+function Generate-ApiKey {
+    $bytes = New-Object byte[] 32
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    $rng.GetBytes($bytes)
+    $rng.Dispose()
+    return ($bytes | ForEach-Object { $_.ToString("x2") }) -join ''
+}
+
+function Write-ApiKey {
+    param([string]$ApiKey)
+
+    $WorkspaceDir = Join-Path $COQUI_INSTALL_DIR ".workspace"
+    $EnvFile = Join-Path $WorkspaceDir ".env"
+
+    if (-not (Test-Path $WorkspaceDir)) {
+        New-Item -ItemType Directory -Force -Path $WorkspaceDir | Out-Null
+    }
+
+    if ((Test-Path $EnvFile) -and (Select-String -Path $EnvFile -Pattern "^COQUI_API_KEY=" -Quiet)) {
+        # Update existing key
+        $content = Get-Content $EnvFile -Raw
+        $content = $content -replace "(?m)^COQUI_API_KEY=.*$", "COQUI_API_KEY=$ApiKey"
+        Set-Content -Path $EnvFile -Value $content -NoNewline
+    } else {
+        Add-Content -Path $EnvFile -Value "COQUI_API_KEY=$ApiKey"
+    }
+}
+
+function Test-ServiceInstalled {
+    try {
+        $task = & schtasks /Query /TN "$SERVICE_TASK_NAME" 2>$null
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    }
+}
+
+function Test-ServiceRunning {
+    try {
+        $output = & schtasks /Query /TN "$SERVICE_TASK_NAME" /FO CSV /NH 2>$null
+        if ($LASTEXITCODE -ne 0) { return $false }
+        return ($output -like "*Running*")
+    } catch {
+        return $false
+    }
+}
+
+function Restart-CoquiService {
+    try {
+        & schtasks /End /TN "$SERVICE_TASK_NAME" 2>$null | Out-Null
+        Start-Sleep -Seconds 1
+        & schtasks /Run /TN "$SERVICE_TASK_NAME" 2>$null | Out-Null
+    } catch {}
+}
+
+function Install-Service {
+    Write-Host ""
+    Write-Host "  Service Setup" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  This will install Coqui as a background API service that:"
+    Write-Host "    * Starts automatically when you log in"
+    Write-Host "    * Restarts on failure"
+    Write-Host "    * Binds to 0.0.0.0:${SERVICE_PORT} (network accessible)"
+    Write-Host "    * Requires API key authentication for security"
+    Write-Host ""
+    Write-Host "  Method: Windows Task Scheduler (no admin required)"
+    Write-Host ""
+
+    # Generate and save API key
+    Write-Status "Generating API key for secure access..."
+    $ApiKey = Generate-ApiKey
+    Write-ApiKey -ApiKey $ApiKey
+    Write-Success "API key saved to $COQUI_INSTALL_DIR\.workspace\.env"
+
+    Write-Host ""
+    Write-Host "  +--------------------------------------------------------------------+"
+    Write-Host "  |  Your API Key (save this - shown only once):                        |"
+    Write-Host "  |                                                                    |"
+    Write-Host "  |  $ApiKey  |" -ForegroundColor Yellow
+    Write-Host "  |                                                                    |"
+    Write-Host "  |  Use this key in the Authorization header:                         |"
+    Write-Host "  |  Authorization: Bearer $ApiKey  |" -ForegroundColor Cyan
+    Write-Host "  +--------------------------------------------------------------------+"
+    Write-Host ""
+
+    # Create the service batch wrapper
+    $ServiceBat = Join-Path $COQUI_INSTALL_DIR "bin\coqui-api-service.bat"
+    $CoquiScript = Join-Path $COQUI_INSTALL_DIR "bin\coqui"
+
+    $BatchContent = @"
+@echo off
+cd /d "$COQUI_INSTALL_DIR"
+php "$CoquiScript" api --host 0.0.0.0 --port $SERVICE_PORT
+"@
+    Set-Content -Path $ServiceBat -Value $BatchContent
+    Write-Success "Service wrapper created: $ServiceBat"
+
+    # Create the XML task definition for restart-on-failure support
+    $TaskXml = @"
+<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Coqui AI Agent - API Server</Description>
+    <URI>\$SERVICE_TASK_NAME</URI>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+    </LogonTrigger>
+  </Triggers>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <RestartOnFailure>
+      <Interval>PT30S</Interval>
+      <Count>3</Count>
+    </RestartOnFailure>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+  </Settings>
+  <Actions>
+    <Exec>
+      <Command>$ServiceBat</Command>
+      <WorkingDirectory>$COQUI_INSTALL_DIR</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
+"@
+
+    $TaskXmlFile = Join-Path $env:TEMP "coqui-task.xml"
+    Set-Content -Path $TaskXmlFile -Value $TaskXml -Encoding Unicode
+
+    Write-Status "Creating scheduled task..."
+
+    # Remove existing task if present
+    & schtasks /Delete /TN "$SERVICE_TASK_NAME" /F 2>$null | Out-Null
+
+    & schtasks /Create /TN "$SERVICE_TASK_NAME" /XML "$TaskXmlFile" /F 2>$null | Out-Null
+    Remove-Item -Path $TaskXmlFile -Force -ErrorAction SilentlyContinue
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "Could not create scheduled task. You may need to run as Administrator."
+        Write-Host "  You can create the task manually:"
+        Write-Host "    schtasks /Create /TN `"$SERVICE_TASK_NAME`" /TR `"$ServiceBat`" /SC ONLOGON"
+        return
+    }
+
+    Write-Success "Scheduled task created: $SERVICE_TASK_NAME"
+
+    # Start the task now
+    Write-Status "Starting the service..."
+    & schtasks /Run /TN "$SERVICE_TASK_NAME" 2>$null | Out-Null
+    Start-Sleep -Seconds 2
+
+    if (Test-ServiceRunning) {
+        Write-Success "Service started - API running on http://0.0.0.0:${SERVICE_PORT}"
+    } else {
+        Write-Warn "Service may still be starting. Check: schtasks /Query /TN `"$SERVICE_TASK_NAME`""
+    }
+
+    $script:SERVICE_INSTALLED = $true
+}
+
+function Uninstall-CoquiService {
+    if (Test-ServiceRunning) {
+        & schtasks /End /TN "$SERVICE_TASK_NAME" 2>$null | Out-Null
+        Write-Success "Service stopped"
+    }
+
+    & schtasks /Delete /TN "$SERVICE_TASK_NAME" /F 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        Write-Success "Scheduled task removed"
+    } else {
+        Write-Warn "Task not found (already removed?)"
+    }
+
+    # Clean up the service batch file
+    $ServiceBat = Join-Path $COQUI_INSTALL_DIR "bin\coqui-api-service.bat"
+    if (Test-Path $ServiceBat) {
+        Remove-Item -Path $ServiceBat -Force
+        Write-Success "Service wrapper removed"
+    }
+}
+
+function Print-ServiceInfo {
+    Write-Host ""
+    Write-Host "  Service Management:" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "    Status:   schtasks /Query /TN `"$SERVICE_TASK_NAME`""
+    Write-Host "    Start:    schtasks /Run /TN `"$SERVICE_TASK_NAME`""
+    Write-Host "    Stop:     schtasks /End /TN `"$SERVICE_TASK_NAME`""
+    Write-Host "    Remove:   schtasks /Delete /TN `"$SERVICE_TASK_NAME`" /F"
+    Write-Host ""
+    Write-Host "  API Endpoint:  http://localhost:${SERVICE_PORT}"
+    Write-Host "  API Key:       stored in $COQUI_INSTALL_DIR\.workspace\.env"
+    Write-Host ""
+}
+
 # ─── Wrapper ─────────────────────────────────────────────────────────────────
 
 function Create-SymlinkWrapper {
@@ -606,6 +900,12 @@ function Print-Success {
     Write-Host ""
     Write-Host "    Make sure Ollama is running:  ollama serve"
     Write-Host "    Pull a model:                 ollama pull glm-4.7-flash"
+
+    # Show service info if a service was installed or is present
+    if ($script:SERVICE_INSTALLED -or (Test-ServiceInstalled)) {
+        Print-ServiceInfo
+    }
+
     Write-Host ""
     Write-Host "  Docs:  https://github.com/AgentCoqui/coqui"
     Write-Host ""
@@ -614,11 +914,75 @@ function Print-Success {
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 function Main {
+    # Parse arguments from $args (passed from outer scope)
+    Parse-Args -Arguments $script:ScriptArgs
+
     Show-Banner
 
     $OriginalDir = Get-Location
 
     try {
+        # ── Selective mode: run only the requested components ──
+        if ($script:SELECTIVE_MODE) {
+            if ($script:INSTALL_PHP) {
+                Check-Php
+                Check-Extensions
+            }
+
+            if ($script:INSTALL_COMPOSER) {
+                if (-not (Test-Command "php")) {
+                    Write-Fatal "PHP is required to install Composer. Re-run with --install-php."
+                }
+                Check-Composer
+            }
+
+            if ($script:INSTALL_COQUI) {
+                if (-not (Test-Command "php")) {
+                    Write-Fatal "PHP is required to install Coqui. Re-run with --install-php."
+                }
+                if (-not (Test-Command "composer")) {
+                    Write-Fatal "Composer is required to install Coqui. Re-run with --install-composer."
+                }
+                Check-Git
+
+                if (Test-CoquiInstalled) {
+                    Update-Coqui
+                } else {
+                    Install-Coqui
+                }
+                Setup-Config
+                Create-SymlinkWrapper
+
+                # Auto-restart service if running after update
+                if (Test-ServiceRunning) {
+                    Write-Status "Restarting service after update..."
+                    Restart-CoquiService
+                    Start-Sleep -Seconds 2
+                    if (Test-ServiceRunning) {
+                        Write-Success "Service restarted"
+                    } else {
+                        Write-Warn "Service may not have restarted. Check task status."
+                    }
+                }
+            }
+
+            if ($script:INSTALL_SERVICE) {
+                if (-not (Test-CoquiInstalled)) {
+                    Write-Fatal "Coqui is not installed. Re-run with --install-coqui or run a full install first."
+                }
+                Install-Service
+                if ($script:SERVICE_INSTALLED) {
+                    Print-ServiceInfo
+                }
+            }
+
+            Write-Host ""
+            Write-Success "Done"
+            Write-Host ""
+            return
+        }
+
+        # ── Full install (no flags — backward compatible) ──
         if (Test-CoquiInstalled) {
             Write-Host "  $([char]0x25B8) Existing installation found at $COQUI_INSTALL_DIR"
             Write-Host ""
@@ -631,6 +995,18 @@ function Main {
             Setup-Config
             Create-SymlinkWrapper
 
+            # Auto-restart service if running after update
+            if (Test-ServiceRunning) {
+                Write-Status "Restarting service after update..."
+                Restart-CoquiService
+                Start-Sleep -Seconds 2
+                if (Test-ServiceRunning) {
+                    Write-Success "Service restarted"
+                } else {
+                    Write-Warn "Service may not have restarted. Check task status."
+                }
+            }
+
             Print-Success "Update"
         } else {
             Check-Php
@@ -642,12 +1018,20 @@ function Main {
             Setup-Config
             Create-SymlinkWrapper
 
+            # Offer service installation on fresh install
+            if (Confirm-Action "Would you like to install Coqui as a background API service?") {
+                Install-Service
+            }
+
             Print-Success "Installation"
         }
     } finally {
         Set-Location $OriginalDir
     }
 }
+
+# Capture script arguments before they're lost in the main scope
+$script:ScriptArgs = $args
 
 # Run — the try/catch prevents unhandled throw from Write-Fatal from
 # propagating ugly red text. We do NOT use "exit 1" here because that

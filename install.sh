@@ -32,8 +32,14 @@ REQUIRED_EXTENSIONS="curl mbstring openssl pdo_sqlite xml zip"
 INSTALL_PHP=false
 INSTALL_COMPOSER=false
 INSTALL_COQUI=false
+INSTALL_SERVICE=false
 NON_INTERACTIVE=false
 SELECTIVE_MODE=false   # true when any --install-* flag is passed
+
+# ─── Service configuration ───────────────────────────────────────────────────
+
+SERVICE_PORT="${COQUI_API_PORT:-3300}"
+SERVICE_INSTALLED=false  # set to true when service is set up during this run
 
 # ─── Argument parsing ────────────────────────────────────────────────────────
 
@@ -46,6 +52,8 @@ parse_args() {
                 INSTALL_COMPOSER=true; SELECTIVE_MODE=true; shift ;;
             --install-coqui)
                 INSTALL_COQUI=true; SELECTIVE_MODE=true; shift ;;
+            --install-service)
+                INSTALL_SERVICE=true; SELECTIVE_MODE=true; shift ;;
             --non-interactive)
                 NON_INTERACTIVE=true; shift ;;
             --help|-h)
@@ -72,6 +80,7 @@ show_usage() {
     echo "  --install-php          Install/check PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ and extensions"
     echo "  --install-composer     Install/check Composer"
     echo "  --install-coqui        Install/update Coqui and create symlink"
+    echo "  --install-service      Install Coqui API as a background service"
     echo "  --non-interactive      Skip all confirmation prompts (assume yes)"
     echo "  --help, -h             Show this help"
     echo ""
@@ -94,6 +103,9 @@ show_usage() {
     echo ""
     echo "  # Coqui only (user has PHP + Composer already)"
     echo "  ./install.sh --install-coqui"
+    echo ""
+    echo "  # Service only (Coqui already installed)"
+    echo "  ./install.sh --install-service"
 }
 
 # ─── Output helpers ──────────────────────────────────────────────────────────
@@ -731,6 +743,388 @@ create_symlink() {
     fi
 }
 
+# ─── Service installation ────────────────────────────────────────────────────
+
+# Detect init system for service management
+detect_init_system() {
+    INIT_SYSTEM=""
+    case "$OS" in
+        Linux)
+            if available systemctl && [ -d /run/systemd/system ]; then
+                INIT_SYSTEM="systemd"
+            fi
+            ;;
+        Darwin)
+            INIT_SYSTEM="launchd"
+            ;;
+    esac
+}
+
+# Generate a random 32-character hex API key
+generate_api_key() {
+    if available openssl; then
+        openssl rand -hex 32
+    else
+        head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n'
+    fi
+}
+
+# Write the API key to the workspace .env file
+write_api_key() {
+    local api_key="$1"
+    local workspace_dir="${COQUI_INSTALL_DIR}/.workspace"
+    local env_file="${workspace_dir}/.env"
+
+    mkdir -p "$workspace_dir"
+
+    # Append or update the key in .env
+    if [ -f "$env_file" ] && grep -q '^COQUI_API_KEY=' "$env_file"; then
+        # Update existing key
+        local tmp_file
+        tmp_file="$(mktemp)"
+        sed "s|^COQUI_API_KEY=.*|COQUI_API_KEY=${api_key}|" "$env_file" > "$tmp_file"
+        mv "$tmp_file" "$env_file"
+    else
+        echo "COQUI_API_KEY=${api_key}" >> "$env_file"
+    fi
+}
+
+# Check if the Coqui service is installed
+is_service_installed() {
+    detect_init_system
+    case "$INIT_SYSTEM" in
+        systemd)
+            [ -f "${HOME}/.config/systemd/user/coqui.service" ]
+            ;;
+        launchd)
+            [ -f "${HOME}/Library/LaunchAgents/bot.coqui.agent.plist" ]
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# Check if the Coqui service is currently running
+is_service_running() {
+    detect_init_system
+    case "$INIT_SYSTEM" in
+        systemd)
+            systemctl --user is-active --quiet coqui 2>/dev/null
+            ;;
+        launchd)
+            launchctl list 2>/dev/null | grep -q "bot.coqui.agent"
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+}
+
+# Restart the service if it is running
+restart_service() {
+    detect_init_system
+    case "$INIT_SYSTEM" in
+        systemd)
+            systemctl --user restart coqui 2>/dev/null
+            ;;
+        launchd)
+            local plist_file="${HOME}/Library/LaunchAgents/bot.coqui.agent.plist"
+            launchctl unload "$plist_file" 2>/dev/null || true
+            launchctl load "$plist_file" 2>/dev/null
+            ;;
+    esac
+}
+
+# Generate and install the systemd user service unit
+install_systemd_service() {
+    local service_dir="${HOME}/.config/systemd/user"
+    local service_file="${service_dir}/coqui.service"
+
+    mkdir -p "$service_dir"
+
+    cat > "$service_file" << SERVICEEOF
+# Coqui — systemd user service
+#
+# Runs the Coqui API server as a background daemon.
+# Managed by the Coqui installer.
+#
+# View logs:
+#   journalctl --user -u coqui -f
+
+[Unit]
+Description=Coqui AI Agent — API Server
+Documentation=https://github.com/AgentCoqui/coqui
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=${COQUI_INSTALL_DIR}/bin/coqui-launcher --api-only --host 0.0.0.0 --port ${SERVICE_PORT}
+WorkingDirectory=${COQUI_INSTALL_DIR}
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=3
+StartLimitIntervalSec=60
+
+# Environment
+Environment=HOME=${HOME}
+Environment=COQUI_INSTALL_DIR=${COQUI_INSTALL_DIR}
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=2G
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=${COQUI_INSTALL_DIR}/.workspace ${COQUI_INSTALL_DIR}/openclaw.json
+PrivateTmp=true
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=coqui
+
+[Install]
+WantedBy=default.target
+SERVICEEOF
+
+    success "Service file created: ${service_file}"
+
+    systemctl --user daemon-reload
+
+    status "Enabling service to start on boot..."
+    systemctl --user enable coqui 2>/dev/null
+    success "Service enabled"
+
+    status "Starting the service..."
+    systemctl --user start coqui 2>/dev/null
+    sleep 1
+
+    if systemctl --user is-active --quiet coqui 2>/dev/null; then
+        success "Service started — API running on http://0.0.0.0:${SERVICE_PORT}"
+    else
+        warn "Service may not have started. Check: journalctl --user -u coqui -n 20"
+    fi
+
+    # Enable lingering so user services start on boot without login
+    if available loginctl; then
+        loginctl enable-linger "$(whoami)" 2>/dev/null || true
+        success "Lingering enabled (service starts on boot without login)"
+    fi
+}
+
+# Generate and install the launchd plist
+install_launchd_service() {
+    local plist_dir="${HOME}/Library/LaunchAgents"
+    local plist_file="${plist_dir}/bot.coqui.agent.plist"
+
+    mkdir -p "$plist_dir"
+
+    cat > "$plist_file" << PLISTEOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>bot.coqui.agent</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>${COQUI_INSTALL_DIR}/bin/coqui-launcher</string>
+        <string>--api-only</string>
+        <string>--host</string>
+        <string>0.0.0.0</string>
+        <string>--port</string>
+        <string>${SERVICE_PORT}</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>${COQUI_INSTALL_DIR}</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>${HOME}</string>
+        <key>COQUI_INSTALL_DIR</key>
+        <string>${COQUI_INSTALL_DIR}</string>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/coqui-stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/tmp/coqui-stderr.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
+PLISTEOF
+
+    success "Plist created: ${plist_file}"
+
+    status "Loading the service..."
+    launchctl unload "$plist_file" 2>/dev/null || true
+    launchctl load "$plist_file" 2>/dev/null
+
+    sleep 1
+    if launchctl list 2>/dev/null | grep -q "bot.coqui.agent"; then
+        success "Service started — API running on http://0.0.0.0:${SERVICE_PORT}"
+    else
+        warn "Service may not have started. Check: tail -f /tmp/coqui-stderr.log"
+    fi
+}
+
+# Uninstall the service
+uninstall_service() {
+    detect_init_system
+    case "$INIT_SYSTEM" in
+        systemd)
+            local service_file="${HOME}/.config/systemd/user/coqui.service"
+            if systemctl --user is-active --quiet coqui 2>/dev/null; then
+                systemctl --user stop coqui 2>/dev/null
+                success "Service stopped"
+            fi
+            if systemctl --user is-enabled --quiet coqui 2>/dev/null; then
+                systemctl --user disable coqui 2>/dev/null
+                success "Service disabled"
+            fi
+            if [ -f "$service_file" ]; then
+                rm -f "$service_file"
+                systemctl --user daemon-reload
+                success "Service file removed"
+            else
+                warn "Service file not found (already removed?)"
+            fi
+            ;;
+        launchd)
+            local plist_file="${HOME}/Library/LaunchAgents/bot.coqui.agent.plist"
+            if launchctl list 2>/dev/null | grep -q "bot.coqui.agent"; then
+                launchctl unload "$plist_file" 2>/dev/null || true
+                success "Service unloaded"
+            fi
+            if [ -f "$plist_file" ]; then
+                rm -f "$plist_file"
+                success "Plist removed"
+            else
+                warn "Plist not found (already removed?)"
+            fi
+            ;;
+        *)
+            warn "No supported init system detected."
+            ;;
+    esac
+}
+
+# Main service installation orchestrator
+install_service() {
+    detect_init_system
+
+    if [ -z "$INIT_SYSTEM" ]; then
+        warn "No supported init system detected (systemd or launchd required)."
+        echo "  Service installation is not available on this system."
+        return
+    fi
+
+    echo ""
+    echo "  ${BOLD}Service Setup${RESET}"
+    echo ""
+    echo "  This will install Coqui as a background API service that:"
+    echo "    • Starts automatically on boot"
+    echo "    • Restarts on failure"
+    echo "    • Binds to 0.0.0.0:${SERVICE_PORT} (network accessible)"
+    echo "    • Requires API key authentication for security"
+    echo ""
+
+    if [ "$INIT_SYSTEM" = "systemd" ]; then
+        echo "  ${BOLD}Init system:${RESET} systemd (user-level, no root required)"
+    elif [ "$INIT_SYSTEM" = "launchd" ]; then
+        echo "  ${BOLD}Init system:${RESET} launchd (user agent, no root required)"
+    fi
+    echo ""
+
+    # Generate and save the API key
+    status "Generating API key for secure access..."
+    local api_key
+    api_key="$(generate_api_key)"
+    write_api_key "$api_key"
+    success "API key saved to ${COQUI_INSTALL_DIR}/.workspace/.env"
+
+    echo ""
+    echo "  ┌──────────────────────────────────────────────────────────────────┐"
+    echo "  │  ${BOLD}Your API Key${RESET} (save this — shown only once):                     │"
+    echo "  │                                                                  │"
+    echo "  │  ${YELLOW}${api_key}${RESET}  │"
+    echo "  │                                                                  │"
+    echo "  │  Use this key in the Authorization header:                       │"
+    echo "  │  ${CYAN}Authorization: Bearer ${api_key}${RESET}  │"
+    echo "  └──────────────────────────────────────────────────────────────────┘"
+    echo ""
+
+    # Ensure the launcher is executable
+    chmod +x "${COQUI_INSTALL_DIR}/bin/coqui-launcher" 2>/dev/null || true
+
+    # Install the appropriate service
+    case "$INIT_SYSTEM" in
+        systemd)
+            install_systemd_service
+            ;;
+        launchd)
+            install_launchd_service
+            ;;
+    esac
+
+    SERVICE_INSTALLED=true
+}
+
+# Print service management instructions
+print_service_info() {
+    detect_init_system
+
+    echo ""
+    echo "  ${BOLD}Service Management:${RESET}"
+    echo ""
+
+    case "$INIT_SYSTEM" in
+        systemd)
+            echo "    Status:   systemctl --user status coqui"
+            echo "    Logs:     journalctl --user -u coqui -f"
+            echo "    Stop:     systemctl --user stop coqui"
+            echo "    Start:    systemctl --user start coqui"
+            echo "    Restart:  systemctl --user restart coqui"
+            echo "    Disable:  systemctl --user disable coqui"
+            echo "    Remove:   bash install.sh --install-service uninstall"
+            ;;
+        launchd)
+            echo "    Status:   launchctl list bot.coqui.agent"
+            echo "    Logs:     tail -f /tmp/coqui-stderr.log"
+            echo "    Stop:     launchctl unload ~/Library/LaunchAgents/bot.coqui.agent.plist"
+            echo "    Start:    launchctl load ~/Library/LaunchAgents/bot.coqui.agent.plist"
+            echo "    Remove:   bash install.sh --install-service uninstall"
+            ;;
+    esac
+
+    echo ""
+    echo "  ${BOLD}API Endpoint:${RESET}  http://localhost:${SERVICE_PORT}"
+    echo "  ${BOLD}API Key:${RESET}       stored in ${COQUI_INSTALL_DIR}/.workspace/.env"
+    echo ""
+}
+
 # ─── Banner ──────────────────────────────────────────────────────────────────
 
 show_banner() {
@@ -771,6 +1165,12 @@ print_success() {
     echo ""
     echo "    Make sure Ollama is running:  ollama serve"
     echo "    Pull a model:                 ollama pull glm-4.7-flash"
+
+    # Show service info if a service was installed or is present
+    if [ "$SERVICE_INSTALLED" = true ] || is_service_installed; then
+        print_service_info
+    fi
+
     echo ""
     echo "  ${BOLD}Docs:${RESET}  https://github.com/AgentCoqui/coqui"
     echo ""
@@ -784,6 +1184,7 @@ main() {
 
     detect_os
     setup_sudo
+    detect_init_system
 
     # ── Selective mode: run only the requested components ──
     if [ "$SELECTIVE_MODE" = true ]; then
@@ -816,6 +1217,28 @@ main() {
             fi
             setup_config
             create_symlink
+
+            # Auto-restart service if running after update
+            if is_service_running; then
+                status "Restarting service after update..."
+                restart_service
+                sleep 1
+                if is_service_running; then
+                    success "Service restarted"
+                else
+                    warn "Service may not have restarted. Check service logs."
+                fi
+            fi
+        fi
+
+        if [ "$INSTALL_SERVICE" = true ]; then
+            if ! is_installed; then
+                fatal "Coqui is not installed. Re-run with --install-coqui or run a full install first."
+            fi
+            install_service
+            if [ "$SERVICE_INSTALLED" = true ]; then
+                print_service_info
+            fi
         fi
 
         echo ""
@@ -837,6 +1260,18 @@ main() {
         setup_config
         create_symlink
 
+        # Auto-restart service if running after update
+        if is_service_running; then
+            status "Restarting service after update..."
+            restart_service
+            sleep 1
+            if is_service_running; then
+                success "Service restarted"
+            else
+                warn "Service may not have restarted. Check service logs."
+            fi
+        fi
+
         print_success "Update"
     else
         check_php
@@ -847,6 +1282,14 @@ main() {
         install_coqui
         setup_config
         create_symlink
+
+        # Offer service installation on fresh install
+        if [ -n "$INIT_SYSTEM" ]; then
+            echo ""
+            if confirm "Would you like to install Coqui as a background API service?"; then
+                install_service
+            fi
+        fi
 
         print_success "Installation"
     fi
