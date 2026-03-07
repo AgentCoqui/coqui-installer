@@ -4,12 +4,26 @@
     https://github.com/AgentCoqui/coqui
 
 .DESCRIPTION
-    Installs PHP, Composer, Git, and Coqui on a Windows system.
+    Installs PHP and Coqui on a Windows system.
+    By default, downloads the latest GitHub release (no Git/Composer needed).
+    Use -Dev to clone the git repository instead (for development).
     Creates a coqui.bat wrapper in your user path for easy execution.
 
+.PARAMETER Dev
+    Use git clone instead of release download (for development).
+
 .EXAMPLE
+    # Default: download latest release
     irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.ps1 | iex
+
+.EXAMPLE
+    # Development mode: git clone
+    .\install.ps1 -Dev
 #>
+
+param(
+    [switch]$Dev
+)
 
 $ErrorActionPreference = "Continue"
 $ProgressPreference = "SilentlyContinue"
@@ -21,12 +35,24 @@ $COQUI_REPO = if ($env:COQUI_REPO) { $env:COQUI_REPO } else { "https://github.co
 $COQUI_INSTALL_DIR = if ($env:COQUI_INSTALL_DIR) { $env:COQUI_INSTALL_DIR } else { Join-Path $env:USERPROFILE ".coqui" }
 $COQUI_VERSION = if ($env:COQUI_VERSION) { $env:COQUI_VERSION } else { "" }
 
+# GitHub release configuration
+$COQUI_GITHUB_OWNER = "AgentCoqui"
+$COQUI_GITHUB_REPO = "coqui"
+$COQUI_API_URL = "https://api.github.com/repos/$COQUI_GITHUB_OWNER/$COQUI_GITHUB_REPO/releases/latest"
+$COQUI_DOWNLOAD_BASE = "https://github.com/$COQUI_GITHUB_OWNER/$COQUI_GITHUB_REPO/releases/download"
+
 # Minimum PHP version required
 $REQUIRED_PHP_MAJOR = 8
 $REQUIRED_PHP_MINOR = 4
 
 # PHP extensions required by Coqui and php-agents
 $REQUIRED_EXTENSIONS = @("curl", "mbstring", "openssl", "pdo_sqlite", "xml", "zip")
+
+# Mode flag
+$script:DEV_MODE = $Dev.IsPresent
+
+# Resolved at runtime
+$script:LATEST_VERSION = ""
 
 # ─── Output helpers ──────────────────────────────────────────────────────────
 
@@ -379,14 +405,225 @@ function Install-Composer {
     }
 }
 
-# ─── Coqui install / update ──────────────────────────────────────────────────
+# ─── Installation detection ──────────────────────────────────────────────────
 
-function Test-CoquiInstalled {
+function Test-DevInstalled {
     $GitPath = Join-Path $COQUI_INSTALL_DIR ".git"
     return (Test-Path $COQUI_INSTALL_DIR) -and (Test-Path $GitPath)
 }
 
-function Install-Coqui {
+function Test-ReleaseInstalled {
+    $VersionFile = Join-Path $COQUI_INSTALL_DIR ".coqui-version"
+    return (Test-Path $COQUI_INSTALL_DIR) -and (Test-Path $VersionFile)
+}
+
+function Test-CoquiInstalled {
+    return (Test-DevInstalled) -or (Test-ReleaseInstalled)
+}
+
+function Get-InstalledVersion {
+    $VersionFile = Join-Path $COQUI_INSTALL_DIR ".coqui-version"
+    if (Test-Path $VersionFile) {
+        return (Get-Content -Path $VersionFile -Raw).Trim()
+    }
+    return ""
+}
+
+# ─── GitHub release functions ────────────────────────────────────────────────
+
+function Get-LatestVersion {
+    if ($COQUI_VERSION) {
+        $script:LATEST_VERSION = $COQUI_VERSION
+        return
+    }
+
+    Write-Status "Checking latest release..."
+
+    try {
+        $Response = Invoke-RestMethod -Uri $COQUI_API_URL -ErrorAction Stop
+    } catch {
+        Write-Fatal "Failed to fetch release info from GitHub. Check your internet connection or try -Dev."
+    }
+
+    $TagName = $Response.tag_name
+    if ([string]::IsNullOrWhiteSpace($TagName)) {
+        Write-Fatal "Could not determine latest version from GitHub. Try: `$env:COQUI_VERSION='0.0.1'; .\install.ps1"
+    }
+
+    # Strip leading 'v' if present
+    $script:LATEST_VERSION = $TagName -replace '^v', ''
+    Write-Success "Latest release: v$($script:LATEST_VERSION)"
+}
+
+function Test-Checksum {
+    param(
+        [string]$FilePath,
+        [string]$ChecksumUrl
+    )
+
+    Write-Status "Verifying checksum..."
+
+    try {
+        $ExpectedContent = (Invoke-WebRequest -Uri $ChecksumUrl -ErrorAction Stop).Content
+    } catch {
+        Write-Warn "Could not download checksum file. Skipping verification."
+        return
+    }
+
+    # The .sha256 file format is: "hash  filename"
+    $ExpectedHash = ($ExpectedContent -split '\s')[0].Trim()
+    $ActualHash = (Get-FileHash -Path $FilePath -Algorithm SHA256).Hash.ToLower()
+
+    if ($ExpectedHash -ne $ActualHash) {
+        Write-Fatal "Checksum verification failed. Expected: $ExpectedHash, Got: $ActualHash"
+    }
+
+    Write-Success "Checksum verified"
+}
+
+# ─── Release install / update ────────────────────────────────────────────────
+
+function Install-Release {
+    Get-LatestVersion
+
+    $ArchiveName = "coqui-v$($script:LATEST_VERSION).zip"
+    $DownloadUrl = "$COQUI_DOWNLOAD_BASE/v$($script:LATEST_VERSION)/$ArchiveName"
+    $ChecksumUrl = "$DownloadUrl.sha256"
+
+    $TempDir = Join-Path $env:TEMP "coqui-install-$(Get-Random)"
+    New-Item -ItemType Directory -Force -Path $TempDir | Out-Null
+
+    try {
+        Write-Status "Downloading Coqui v$($script:LATEST_VERSION)..."
+        $ArchivePath = Join-Path $TempDir $ArchiveName
+
+        try {
+            Invoke-WebRequest -Uri $DownloadUrl -OutFile $ArchivePath -ErrorAction Stop
+        } catch {
+            Write-Fatal "Failed to download release v$($script:LATEST_VERSION). URL: $DownloadUrl"
+        }
+
+        Test-Checksum -FilePath $ArchivePath -ChecksumUrl $ChecksumUrl
+
+        Write-Status "Installing to $COQUI_INSTALL_DIR..."
+
+        # Extract — the archive contains a top-level coqui/ directory
+        Expand-Archive -Path $ArchivePath -DestinationPath $TempDir -Force
+
+        # Create install dir if needed
+        if (-not (Test-Path $COQUI_INSTALL_DIR)) {
+            New-Item -ItemType Directory -Force -Path $COQUI_INSTALL_DIR | Out-Null
+        }
+
+        # Copy contents from extracted directory into install dir
+        $ExtractedDir = Join-Path $TempDir "coqui"
+        if (Test-Path $ExtractedDir) {
+            Copy-Item -Path "$ExtractedDir\*" -Destination $COQUI_INSTALL_DIR -Recurse -Force
+        } else {
+            Write-Fatal "Unexpected archive structure — 'coqui' directory not found."
+        }
+
+        # Write version marker
+        Set-Content -Path (Join-Path $COQUI_INSTALL_DIR ".coqui-version") -Value $script:LATEST_VERSION
+
+        Write-Success "Coqui v$($script:LATEST_VERSION) installed"
+    } finally {
+        Remove-Item -Path $TempDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Update-Release {
+    Get-LatestVersion
+
+    $CurrentVersion = Get-InstalledVersion
+
+    if ($CurrentVersion -eq $script:LATEST_VERSION) {
+        Write-Success "Coqui v$CurrentVersion is already up to date"
+        return
+    }
+
+    if ($CurrentVersion) {
+        Write-Status "Update available: v$CurrentVersion -> v$($script:LATEST_VERSION)"
+    }
+
+    $ArchiveName = "coqui-v$($script:LATEST_VERSION).zip"
+    $DownloadUrl = "$COQUI_DOWNLOAD_BASE/v$($script:LATEST_VERSION)/$ArchiveName"
+    $ChecksumUrl = "$DownloadUrl.sha256"
+
+    $TempDir = Join-Path $env:TEMP "coqui-update-$(Get-Random)"
+    New-Item -ItemType Directory -Force -Path $TempDir | Out-Null
+
+    try {
+        Write-Status "Downloading Coqui v$($script:LATEST_VERSION)..."
+        $ArchivePath = Join-Path $TempDir $ArchiveName
+
+        try {
+            Invoke-WebRequest -Uri $DownloadUrl -OutFile $ArchivePath -ErrorAction Stop
+        } catch {
+            Write-Fatal "Failed to download release v$($script:LATEST_VERSION)."
+        }
+
+        Test-Checksum -FilePath $ArchivePath -ChecksumUrl $ChecksumUrl
+
+        # Back up user data before replacing
+        Write-Status "Backing up user data..."
+        $ConfigFile = Join-Path $COQUI_INSTALL_DIR "openclaw.json"
+        $LegacyWorkspaceDir = Join-Path $COQUI_INSTALL_DIR ".workspace"
+        $HomeWorkspaceDir = Join-Path $HOME ".workspace"
+
+        if (Test-Path $ConfigFile) {
+            Copy-Item -Path $ConfigFile -Destination (Join-Path $TempDir "openclaw.json.bak") -Force
+        }
+        # Back up workspace — check both legacy location and home directory
+        if (Test-Path $LegacyWorkspaceDir) {
+            Copy-Item -Path $LegacyWorkspaceDir -Destination (Join-Path $TempDir ".workspace-legacy.bak") -Recurse -Force
+        }
+        if (Test-Path $HomeWorkspaceDir) {
+            Copy-Item -Path $HomeWorkspaceDir -Destination (Join-Path $TempDir ".workspace-home.bak") -Recurse -Force
+        }
+
+        # Extract new release
+        Expand-Archive -Path $ArchivePath -DestinationPath $TempDir -Force
+
+        # Remove old files (except hidden user data we already backed up)
+        Get-ChildItem -Path $COQUI_INSTALL_DIR -Exclude ".workspace", "openclaw.json" |
+            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+
+        # Install new release
+        $ExtractedDir = Join-Path $TempDir "coqui"
+        if (Test-Path $ExtractedDir) {
+            Copy-Item -Path "$ExtractedDir\*" -Destination $COQUI_INSTALL_DIR -Recurse -Force
+        }
+
+        # Restore user data (overwrite any defaults from new release)
+        $ConfigBackup = Join-Path $TempDir "openclaw.json.bak"
+        $LegacyWorkspaceBackup = Join-Path $TempDir ".workspace-legacy.bak"
+
+        if (Test-Path $ConfigBackup) {
+            Copy-Item -Path $ConfigBackup -Destination $ConfigFile -Force
+        }
+        # Restore legacy workspace in install dir if it existed
+        if (Test-Path $LegacyWorkspaceBackup) {
+            $LegacyWorkspaceDir = Join-Path $COQUI_INSTALL_DIR ".workspace"
+            if (-not (Test-Path $LegacyWorkspaceDir)) {
+                New-Item -ItemType Directory -Path $LegacyWorkspaceDir -Force | Out-Null
+            }
+            Copy-Item -Path "$LegacyWorkspaceBackup\*" -Destination $LegacyWorkspaceDir -Recurse -Force
+        }
+        # Home workspace (~/.workspace) is never deleted during upgrade — no restore needed
+
+        # Write version marker
+        Set-Content -Path (Join-Path $COQUI_INSTALL_DIR ".coqui-version") -Value $script:LATEST_VERSION
+
+        Write-Success "Coqui updated to v$($script:LATEST_VERSION)"
+    } finally {
+        Remove-Item -Path $TempDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+# ─── Dev (git) install / update ──────────────────────────────────────────────
+
+function Install-Dev {
     Write-Status "Cloning Coqui into $COQUI_INSTALL_DIR..."
 
     $CloneArgs = @("clone", "--depth", "1")
@@ -414,12 +651,25 @@ function Install-Coqui {
     Run-ComposerInstall
 }
 
-function Update-Coqui {
+function Update-Dev {
     Write-Status "Checking for updates..."
 
     Set-Location $COQUI_INSTALL_DIR
 
+    # Stash any local changes (e.g. modified composer.lock) before pulling
+    $StashResult = ""
+    try {
+        $StashResult = & git stash --include-untracked 2>&1 | Out-String
+    } catch {}
+
     & git fetch --quiet 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        # Restore stash before erroring
+        if ($StashResult -match "Saved working directory") {
+            & git stash pop --quiet 2>&1 | Out-Null
+        }
+        Write-Fatal "Failed to fetch updates. Check your internet connection."
+    }
 
     $LocalHead = (& git rev-parse HEAD 2>$null).Trim()
     $RemoteHead = ""
@@ -433,16 +683,47 @@ function Update-Coqui {
 
     if ($LocalHead -eq $RemoteHead) {
         Write-Success "Coqui is already up to date"
+
+        # Restore stashed changes
+        if ($StashResult -match "Saved working directory") {
+            & git stash pop --quiet 2>&1 | Out-Null
+        }
+
         Run-ComposerInstall
         return
     }
 
     Write-Status "Updating Coqui..."
+
+    # Unshallow if needed (shallow clones can fail ff-only)
+    $ShallowFile = Join-Path $COQUI_INSTALL_DIR ".git\shallow"
+    if (Test-Path $ShallowFile) {
+        & git fetch --unshallow --quiet 2>&1 | Out-Null
+    }
+
     & git pull --ff-only --quiet 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) {
-        Write-Fatal "Failed to update. Try removing $COQUI_INSTALL_DIR and re-running."
+        # Restore stash before reporting error
+        if ($StashResult -match "Saved working directory") {
+            & git stash pop --quiet 2>&1 | Out-Null
+        }
+        Write-Fatal "Failed to update. Your local branch may have diverged. Try: Remove-Item -Recurse $COQUI_INSTALL_DIR; re-run the installer."
     }
+
     Write-Success "Coqui updated"
+
+    # Restore stashed changes — if pop fails, drop the stash since
+    # the fresh pull state is authoritative and composer install will
+    # regenerate composer.lock from the updated composer.json.
+    if ($StashResult -match "Saved working directory") {
+        & git stash pop --quiet 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warn "Could not restore local changes from stash (likely a merge conflict)."
+            Write-Warn "Dropping stash — composer install will regenerate lock file."
+            & git stash drop --quiet 2>&1 | Out-Null
+        }
+    }
+
     Run-ComposerInstall
 }
 
@@ -450,13 +731,24 @@ function Run-ComposerInstall {
     Write-Status "Installing dependencies..."
 
     Set-Location $COQUI_INSTALL_DIR
+
+    # Remove stale lock file if it conflicts with the current composer.json
+    $ValidateOutput = & composer validate --no-check-all --no-check-publish 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warn "composer.lock is out of sync — regenerating..."
+        $LockFile = Join-Path $COQUI_INSTALL_DIR "composer.lock"
+        if (Test-Path $LockFile) {
+            Remove-Item -Force $LockFile
+        }
+    }
+
     try {
         $InstallOutput = & composer install --no-dev --optimize-autoloader --no-interaction 2>&1
         if ($LASTEXITCODE -ne 0) {
             if ($InstallOutput) {
                 Write-Err ($InstallOutput | Out-String).Trim()
             }
-            Write-Fatal "Composer install failed."
+            Write-Fatal "Composer install failed. Run manually: cd $COQUI_INSTALL_DIR; composer install --no-dev"
         }
     } catch {
         throw
@@ -481,7 +773,7 @@ function Setup-Config {
 {
     "agents": {
         "defaults": {
-            "workspace": ".workspace",
+            "workspace": "~/.workspace",
             "models": {
                 "ollama/qwen3:latest": { "alias": "qwen" },
                 "ollama/qwen3-coder:latest": { "alias": "coder" },
@@ -584,9 +876,19 @@ function Show-Banner {
 function Print-Success {
     param([string]$InstallType)
 
+    $VersionInfo = ""
+    if ($script:LATEST_VERSION) {
+        $VersionInfo = " v$($script:LATEST_VERSION)"
+    } else {
+        $VersionFile = Join-Path $COQUI_INSTALL_DIR ".coqui-version"
+        if (Test-Path $VersionFile) {
+            $VersionInfo = " v$((Get-Content -Path $VersionFile -Raw).Trim())"
+        }
+    }
+
     Write-Host ""
     Write-Host "  ──────────────────────────────────────────"
-    Write-Host -Object "  ${InstallType} complete!" -ForegroundColor Green
+    Write-Host -Object "  ${InstallType} complete!${VersionInfo}" -ForegroundColor Green
     Write-Host "  ──────────────────────────────────────────"
     Write-Host ""
     Write-Host "  Get started:"
@@ -619,30 +921,76 @@ function Main {
     $OriginalDir = Get-Location
 
     try {
-        if (Test-CoquiInstalled) {
-            Write-Host "  $([char]0x25B8) Existing installation found at $COQUI_INSTALL_DIR"
-            Write-Host ""
+        if ($script:DEV_MODE) {
+            # Dev mode: git clone workflow
+            if (Test-DevInstalled) {
+                Write-Host "  $([char]0x25B8) Existing dev installation found at $COQUI_INSTALL_DIR"
+                Write-Host ""
 
-            Check-Php
-            Check-Extensions
-            Check-Composer
+                Check-Php
+                Check-Extensions
+                Check-Composer
 
-            Update-Coqui
-            Setup-Config
-            Create-SymlinkWrapper
+                Update-Dev
+                Setup-Config
+                Create-SymlinkWrapper
 
-            Print-Success "Update"
+                Print-Success "Update"
+            } else {
+                if (Test-ReleaseInstalled) {
+                    Write-Host ""
+                    Write-Warn "A release installation was found at $COQUI_INSTALL_DIR"
+                    Write-Host "  Remove it first to switch to dev mode:"
+                    Write-Host "    Remove-Item -Recurse -Force $COQUI_INSTALL_DIR"
+                    Write-Host ""
+                    Write-Fatal "Cannot install dev over a release installation."
+                }
+
+                Check-Php
+                Check-Extensions
+                Check-Git
+                Check-Composer
+
+                Install-Dev
+                Setup-Config
+                Create-SymlinkWrapper
+
+                Print-Success "Installation"
+            }
         } else {
-            Check-Php
-            Check-Extensions
-            Check-Git
-            Check-Composer
+            # Release mode (default): download pre-built archive
+            if (Test-DevInstalled) {
+                Write-Host ""
+                Write-Warn "A development (git) installation was found at $COQUI_INSTALL_DIR"
+                Write-Host "  To update it, re-run with -Dev"
+                Write-Host "  To switch to release mode, remove it first:"
+                Write-Host "    Remove-Item -Recurse -Force $COQUI_INSTALL_DIR"
+                Write-Host ""
+                Write-Fatal "Cannot install release over a dev installation."
+            }
 
-            Install-Coqui
-            Setup-Config
-            Create-SymlinkWrapper
+            if (Test-ReleaseInstalled) {
+                Write-Host "  $([char]0x25B8) Existing installation found at $COQUI_INSTALL_DIR"
+                Write-Host ""
 
-            Print-Success "Installation"
+                Check-Php
+                Check-Extensions
+
+                Update-Release
+                Setup-Config
+                Create-SymlinkWrapper
+
+                Print-Success "Update"
+            } else {
+                Check-Php
+                Check-Extensions
+
+                Install-Release
+                Setup-Config
+                Create-SymlinkWrapper
+
+                Print-Success "Installation"
+            }
         }
     } finally {
         Set-Location $OriginalDir
