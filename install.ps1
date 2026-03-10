@@ -22,7 +22,8 @@
 #>
 
 param(
-    [switch]$Dev
+    [switch]$Dev,
+    [switch]$Quiet
 )
 
 $ErrorActionPreference = "Continue"
@@ -50,6 +51,7 @@ $REQUIRED_EXTENSIONS = @("curl", "mbstring", "openssl", "pdo_sqlite", "xml", "zi
 
 # Mode flag
 $script:DEV_MODE = $Dev.IsPresent
+$script:QUIET_MODE = $Quiet.IsPresent
 
 # Resolved at runtime
 $script:LATEST_VERSION = ""
@@ -58,12 +60,19 @@ $script:LATEST_VERSION = ""
 
 function Write-Status {
     param([string]$Message)
+    if ($script:QUIET_MODE) { return }
     Write-Host -Object "  $([char]0x25B8) $Message" -ForegroundColor Cyan
 }
 
 function Write-Success {
     param([string]$Message)
+    if ($script:QUIET_MODE) { return }
     Write-Host -Object "  $([char]0x2713) $Message" -ForegroundColor Green
+}
+
+function Write-Progress {
+    param([string]$Message)
+    Write-Host -Object "  $([char]0x25B8) $Message" -ForegroundColor Cyan
 }
 
 function Write-Warn {
@@ -856,11 +865,13 @@ function Create-SymlinkWrapper {
 # ─── Banner ──────────────────────────────────────────────────────────────────
 
 function Show-Banner {
+    if ($script:QUIET_MODE) { return }
     Write-Host ""
-    Write-Host -Object "  ▄█████  ▄▄▄   ▄▄▄  ▄▄ ▄▄ ▄▄   █████▄  ▄▄▄ ▄▄▄▄▄▄" -ForegroundColor Green
-    Write-Host -Object "  ██     ██▀██ ██▀██ ██ ██ ██   ██▄▄██ ██▀██  ██  " -ForegroundColor Green
-    Write-Host -Object "  ▀█████ ▀███▀ ▀███▀ ▀███▀ ██   ██▄▄█▀ ▀███▀  ██  " -ForegroundColor Green
-    Write-Host -Object "                  ▀▀                              " -ForegroundColor Green
+    Write-Host -Object "   ▄▄·       .▄▄▄  ▄• ▄▌▪  ▄▄▄▄·       ▄▄▄▄▄" -ForegroundColor Green
+    Write-Host -Object "  ▐█ ▌▪▪     ▐▀•▀█ █▪██▌██ ▐█ ▀█▪▪     •██  " -ForegroundColor Green
+    Write-Host -Object "  ██ ▄▄ ▄█▀▄ █▌·.█▌█▌▐█▌▐█·▐█▀▀█▄ ▄█▀▄  ▐█.▪" -ForegroundColor Green
+    Write-Host -Object "  ▐███▌▐█▌.▐▌▐█▪▄█·▐█▄█▌▐█▌██▄▪▐█▐█▌.▐▌ ▐█▌·" -ForegroundColor Green
+    Write-Host -Object "  ·▀▀▀  ▀█▄▀▪·▀▀█.  ▀▀▀ ▀▀▀·▀▀▀▀  ▀█▄▀▪ ▀▀▀ " -ForegroundColor Green
     Write-Host ""
     Write-Host "  Coqui Installer (Windows)"
     Write-Host ""
@@ -878,6 +889,13 @@ function Print-Success {
         $VersionFile = Join-Path $COQUI_INSTALL_DIR ".coqui-version"
         if (Test-Path $VersionFile) {
             $VersionInfo = " v$((Get-Content -Path $VersionFile -Raw).Trim())"
+        }
+    }
+
+    if ($script:QUIET_MODE) {
+        Write-Progress "${InstallType} complete!${VersionInfo}"
+        return
+    }
         }
     }
 

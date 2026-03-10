@@ -39,6 +39,7 @@ INSTALL_PHP=false
 INSTALL_COMPOSER=false
 INSTALL_COQUI=false
 NON_INTERACTIVE=false
+QUIET_MODE=false       # true when --quiet is passed (minimal output)
 SELECTIVE_MODE=false   # true when any --install-* flag is passed
 DEV_MODE=false         # true when --dev is passed (git clone instead of release)
 
@@ -60,6 +61,8 @@ parse_args() {
                 DEV_MODE=true; shift ;;
             --non-interactive)
                 NON_INTERACTIVE=true; shift ;;
+            --quiet|-q)
+                QUIET_MODE=true; shift ;;
             --help|-h)
                 show_usage; exit 0 ;;
             *)
@@ -86,6 +89,7 @@ show_usage() {
     echo "  --install-coqui        Install/update Coqui and create symlink"
     echo "  --dev                  Use git clone instead of release download (for development)"
     echo "  --non-interactive      Skip all confirmation prompts (assume yes)"
+    echo "  --quiet, -q            Minimal output (milestones and errors only)"
     echo "  --help, -h             Show this help"
     echo ""
     echo "By default, the installer downloads the latest GitHub release."
@@ -131,11 +135,12 @@ TICK="${GREEN}✓${RESET}"
 CROSS="${RED}✗${RESET}"
 ARROW="${CYAN}▸${RESET}"
 
-status()  { echo "  ${ARROW} $*"; }
-success() { echo "  ${TICK} $*"; }
+status()  { [ "$QUIET_MODE" = true ] && return; echo "  ${ARROW} $*"; }
+success() { [ "$QUIET_MODE" = true ] && return; echo "  ${TICK} $*"; }
 warn()    { echo "  ${YELLOW}! $*${RESET}"; }
 error()   { echo "  ${CROSS} ${RED}$*${RESET}" >&2; }
 fatal()   { error "$@"; exit 1; }
+progress() { echo "  ${ARROW} $*"; }  # always prints, even in quiet mode
 
 # ─── Utility functions ───────────────────────────────────────────────────────
 
@@ -1010,12 +1015,15 @@ create_symlink() {
 
 # ─── Banner ──────────────────────────────────────────────────────────────────
 
+
 show_banner() {
+    if [ "$QUIET_MODE" = true ]; then return; fi
     echo ""
-    echo "  ${BOLD}${GREEN}▄█████  ▄▄▄   ▄▄▄  ▄▄ ▄▄ ▄▄   █████▄  ▄▄▄ ▄▄▄▄▄▄${RESET}"
-    echo "  ${BOLD}${GREEN}██     ██▀██ ██▀██ ██ ██ ██   ██▄▄██ ██▀██  ██  ${RESET}"
-    echo "  ${BOLD}${GREEN}▀█████ ▀███▀ ▀███▀ ▀███▀ ██   ██▄▄█▀ ▀███▀  ██  ${RESET}"
-    echo "  ${BOLD}${GREEN}                ▀▀                              ${RESET}"
+    echo "  ${GREEN} ▄▄·       .▄▄▄  ▄• ▄▌▪  ▄▄▄▄·       ▄▄▄▄▄${RESET}"
+    echo "  ${GREEN}▐█ ▌▪▪     ▐▀•▀█ █▪██▌██ ▐█ ▀█▪▪     •██  ${RESET}"
+    echo "  ${GREEN}██ ▄▄ ▄█▀▄ █▌·.█▌█▌▐█▌▐█·▐█▀▀█▄ ▄█▀▄  ▐█.▪${RESET}"
+    echo "  ${GREEN}▐███▌▐█▌.▐▌▐█▪▄█·▐█▄█▌▐█▌██▄▪▐█▐█▌.▐▌ ▐█▌·${RESET}"
+    echo "  ${GREEN}·▀▀▀  ▀█▄▀▪·▀▀█.  ▀▀▀ ▀▀▀·▀▀▀▀  ▀█▄▀▪ ▀▀▀ ${RESET}"
     echo ""
     echo "  ${BOLD}Coqui Installer${RESET}"
     echo ""
@@ -1031,6 +1039,11 @@ print_success() {
         version_info=" v${LATEST_VERSION}"
     elif [ -f "$COQUI_INSTALL_DIR/.coqui-version" ]; then
         version_info=" v$(cat "$COQUI_INSTALL_DIR/.coqui-version")"
+    fi
+
+    if [ "$QUIET_MODE" = true ]; then
+        progress "${install_type} complete!${version_info}"
+        return
     fi
 
     echo ""
