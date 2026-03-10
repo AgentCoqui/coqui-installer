@@ -20,6 +20,12 @@ COQUI_REPO="${COQUI_REPO:-https://github.com/AgentCoqui/coqui.git}"
 COQUI_INSTALL_DIR="${COQUI_INSTALL_DIR:-$HOME/.coqui}"
 COQUI_VERSION="${COQUI_VERSION:-}"
 
+# GitHub release configuration
+COQUI_GITHUB_OWNER="AgentCoqui"
+COQUI_GITHUB_REPO="coqui"
+COQUI_API_URL="https://api.github.com/repos/${COQUI_GITHUB_OWNER}/${COQUI_GITHUB_REPO}/releases/latest"
+COQUI_DOWNLOAD_BASE="https://github.com/${COQUI_GITHUB_OWNER}/${COQUI_GITHUB_REPO}/releases/download"
+
 # Minimum PHP version required
 REQUIRED_PHP_MAJOR=8
 REQUIRED_PHP_MINOR=4
@@ -34,6 +40,10 @@ INSTALL_COMPOSER=false
 INSTALL_COQUI=false
 NON_INTERACTIVE=false
 SELECTIVE_MODE=false   # true when any --install-* flag is passed
+DEV_MODE=false         # true when --dev is passed (git clone instead of release)
+
+# Resolved at runtime
+LATEST_VERSION=""
 
 # ─── Argument parsing ────────────────────────────────────────────────────────
 
@@ -46,6 +56,8 @@ parse_args() {
                 INSTALL_COMPOSER=true; SELECTIVE_MODE=true; shift ;;
             --install-coqui)
                 INSTALL_COQUI=true; SELECTIVE_MODE=true; shift ;;
+            --dev)
+                DEV_MODE=true; shift ;;
             --non-interactive)
                 NON_INTERACTIVE=true; shift ;;
             --help|-h)
@@ -72,19 +84,29 @@ show_usage() {
     echo "  --install-php          Install/check PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ and extensions"
     echo "  --install-composer     Install/check Composer"
     echo "  --install-coqui        Install/update Coqui and create symlink"
+    echo "  --dev                  Use git clone instead of release download (for development)"
     echo "  --non-interactive      Skip all confirmation prompts (assume yes)"
     echo "  --help, -h             Show this help"
+    echo ""
+    echo "By default, the installer downloads the latest GitHub release."
+    echo "Use --dev to clone the git repository instead (requires Git and Composer)."
     echo ""
     echo "When no --install-* flags are given, all components are installed (full setup)."
     echo ""
     echo "Environment variables:"
     echo "  COQUI_REPO             Git repo URL (default: ${COQUI_REPO})"
     echo "  COQUI_INSTALL_DIR      Install path (default: \$HOME/.coqui)"
-    echo "  COQUI_VERSION          Git branch or tag (default: latest)"
+    echo "  COQUI_VERSION          Release version or git branch/tag (default: latest)"
     echo ""
     echo "Examples:"
-    echo "  # Full install (default)"
+    echo "  # Full install — latest release (default)"
     echo "  curl -fsSL https://...install.sh | bash"
+    echo ""
+    echo "  # Development install — git clone"
+    echo "  ./install.sh --dev"
+    echo ""
+    echo "  # Specific version"
+    echo "  COQUI_VERSION=0.0.1 ./install.sh"
     echo ""
     echo "  # PHP only, no prompts"
     echo "  ./install.sh --install-php --non-interactive"
@@ -92,7 +114,7 @@ show_usage() {
     echo "  # PHP + Composer only"
     echo "  ./install.sh --install-php --install-composer"
     echo ""
-    echo "  # Coqui only (user has PHP + Composer already)"
+    echo "  # Coqui only (user has PHP already)"
     echo "  ./install.sh --install-coqui"
 }
 
@@ -544,13 +566,225 @@ install_composer() {
     success "Composer installed to $BIN_DIR/composer"
 }
 
-# ─── Coqui install / update ─────────────────────────────────────────────────
+# ─── Installation detection ─────────────────────────────────────────────────
 
-is_installed() {
+# Check for a git-based (dev) installation
+is_dev_installed() {
     [ -d "$COQUI_INSTALL_DIR" ] && [ -d "$COQUI_INSTALL_DIR/.git" ]
 }
 
-install_coqui() {
+# Check for a release-based installation
+is_release_installed() {
+    [ -d "$COQUI_INSTALL_DIR" ] && [ -f "$COQUI_INSTALL_DIR/.coqui-version" ]
+}
+
+# Check for any installation
+is_installed() {
+    is_dev_installed || is_release_installed
+}
+
+# Read the currently installed release version
+get_installed_version() {
+    if [ -f "$COQUI_INSTALL_DIR/.coqui-version" ]; then
+        cat "$COQUI_INSTALL_DIR/.coqui-version"
+    else
+        echo ""
+    fi
+}
+
+# ─── GitHub release functions ────────────────────────────────────────────────
+
+# Fetch the latest release version from the GitHub API.
+# Sets LATEST_VERSION to the semver string (e.g. "0.0.1").
+fetch_latest_version() {
+    if [ -n "$COQUI_VERSION" ]; then
+        LATEST_VERSION="$COQUI_VERSION"
+        return
+    fi
+
+    status "Checking latest release..."
+
+    local api_response
+    api_response="$(curl -fsSL "$COQUI_API_URL" 2>/dev/null)" \
+        || fatal "Failed to fetch release info from GitHub. Check your internet connection or try --dev."
+
+    # Parse tag_name from JSON without jq (works with grep + sed)
+    local tag_name
+    tag_name="$(echo "$api_response" | grep '"tag_name"' | head -1 | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')"
+
+    if [ -z "$tag_name" ]; then
+        fatal "Could not determine latest version from GitHub. Try: COQUI_VERSION=0.0.1 $0"
+    fi
+
+    # Strip leading 'v' if present
+    LATEST_VERSION="${tag_name#v}"
+    success "Latest release: v${LATEST_VERSION}"
+}
+
+# Verify SHA-256 checksum of a downloaded file.
+# Usage: verify_checksum <file_path> <checksum_url>
+verify_checksum() {
+    local file_path="$1"
+    local checksum_url="$2"
+    local expected_checksum
+
+    status "Verifying checksum..."
+
+    expected_checksum="$(curl -fsSL "$checksum_url" 2>/dev/null)" || {
+        warn "Could not download checksum file. Skipping verification."
+        return 0
+    }
+
+    # The .sha256 file format is: "hash  filename"
+    local expected_hash
+    expected_hash="$(echo "$expected_checksum" | awk '{print $1}')"
+
+    local actual_hash
+    if available sha256sum; then
+        actual_hash="$(sha256sum "$file_path" | awk '{print $1}')"
+    elif available shasum; then
+        actual_hash="$(shasum -a 256 "$file_path" | awk '{print $1}')"
+    else
+        warn "No sha256sum or shasum available. Skipping verification."
+        return 0
+    fi
+
+    if [ "$expected_hash" != "$actual_hash" ]; then
+        fatal "Checksum verification failed. The download may be corrupted. Expected: ${expected_hash}, Got: ${actual_hash}"
+    fi
+
+    success "Checksum verified"
+}
+
+# ─── Release install / update ────────────────────────────────────────────────
+
+install_release() {
+    fetch_latest_version
+
+    local archive_name="coqui-v${LATEST_VERSION}.tar.gz"
+    local download_url="${COQUI_DOWNLOAD_BASE}/v${LATEST_VERSION}/${archive_name}"
+    local checksum_url="${download_url}.sha256"
+    local tmp_dir
+
+    tmp_dir="$(mktemp -d)"
+    # shellcheck disable=SC2064
+    trap "rm -rf '$tmp_dir'" EXIT
+
+    status "Downloading Coqui v${LATEST_VERSION}..."
+    curl -fsSL "$download_url" -o "${tmp_dir}/${archive_name}" \
+        || fatal "Failed to download release v${LATEST_VERSION}. URL: ${download_url}"
+
+    verify_checksum "${tmp_dir}/${archive_name}" "$checksum_url"
+
+    status "Installing to ${COQUI_INSTALL_DIR}..."
+    mkdir -p "$COQUI_INSTALL_DIR"
+
+    # Extract — the archive contains a top-level coqui/ directory
+    tar -xzf "${tmp_dir}/${archive_name}" -C "$tmp_dir"
+
+    # Copy contents from extracted directory into install dir
+    cp -a "${tmp_dir}/coqui/." "$COQUI_INSTALL_DIR/"
+
+    # Write version marker
+    echo "$LATEST_VERSION" > "$COQUI_INSTALL_DIR/.coqui-version"
+
+    # Ensure bin scripts are executable
+    chmod +x "$COQUI_INSTALL_DIR/bin/coqui" 2>/dev/null || true
+    chmod +x "$COQUI_INSTALL_DIR/bin/coqui-launcher" 2>/dev/null || true
+
+    rm -rf "$tmp_dir"
+    trap - EXIT
+
+    success "Coqui v${LATEST_VERSION} installed"
+}
+
+update_release() {
+    fetch_latest_version
+
+    local current_version
+    current_version="$(get_installed_version)"
+
+    if [ "$current_version" = "$LATEST_VERSION" ]; then
+        success "Coqui v${current_version} is already up to date"
+        return
+    fi
+
+    if [ -n "$current_version" ]; then
+        status "Update available: v${current_version} -> v${LATEST_VERSION}"
+    fi
+
+    if ! confirm "Update Coqui to v${LATEST_VERSION}?"; then
+        success "Update skipped"
+        return
+    fi
+
+    local archive_name="coqui-v${LATEST_VERSION}.tar.gz"
+    local download_url="${COQUI_DOWNLOAD_BASE}/v${LATEST_VERSION}/${archive_name}"
+    local checksum_url="${download_url}.sha256"
+    local tmp_dir
+
+    tmp_dir="$(mktemp -d)"
+    # shellcheck disable=SC2064
+    trap "rm -rf '$tmp_dir'" EXIT
+
+    status "Downloading Coqui v${LATEST_VERSION}..."
+    curl -fsSL "$download_url" -o "${tmp_dir}/${archive_name}" \
+        || fatal "Failed to download release v${LATEST_VERSION}."
+
+    verify_checksum "${tmp_dir}/${archive_name}" "$checksum_url"
+
+    # Back up user data before replacing
+    status "Backing up user data..."
+    if [ -f "$COQUI_INSTALL_DIR/openclaw.json" ]; then
+        cp "$COQUI_INSTALL_DIR/openclaw.json" "${tmp_dir}/openclaw.json.bak"
+    fi
+    # Back up workspace — check both legacy location and home directory
+    if [ -d "$COQUI_INSTALL_DIR/.workspace" ]; then
+        cp -a "$COQUI_INSTALL_DIR/.workspace" "${tmp_dir}/.workspace-legacy.bak"
+    fi
+    if [ -d "$HOME/.workspace" ]; then
+        cp -a "$HOME/.workspace" "${tmp_dir}/.workspace-home.bak"
+    fi
+
+    # Extract new release
+    tar -xzf "${tmp_dir}/${archive_name}" -C "$tmp_dir"
+
+    # Remove old files (except hidden user data we already backed up)
+    find "$COQUI_INSTALL_DIR" -mindepth 1 -maxdepth 1 \
+        ! -name '.workspace' \
+        ! -name 'openclaw.json' \
+        -exec rm -rf {} + 2>/dev/null || true
+
+    # Install new release
+    cp -a "${tmp_dir}/coqui/." "$COQUI_INSTALL_DIR/"
+
+    # Restore user data (overwrite any defaults from new release)
+    if [ -f "${tmp_dir}/openclaw.json.bak" ]; then
+        cp "${tmp_dir}/openclaw.json.bak" "$COQUI_INSTALL_DIR/openclaw.json"
+    fi
+    # Restore workspace — legacy location preserved in install dir, home workspace is untouched
+    if [ -d "${tmp_dir}/.workspace-legacy.bak" ]; then
+        mkdir -p "$COQUI_INSTALL_DIR/.workspace"
+        cp -a "${tmp_dir}/.workspace-legacy.bak/." "$COQUI_INSTALL_DIR/.workspace/"
+    fi
+    # Home workspace (~/.workspace) is never deleted during upgrade — no restore needed
+
+    # Write version marker
+    echo "$LATEST_VERSION" > "$COQUI_INSTALL_DIR/.coqui-version"
+
+    # Ensure bin scripts are executable
+    chmod +x "$COQUI_INSTALL_DIR/bin/coqui" 2>/dev/null || true
+    chmod +x "$COQUI_INSTALL_DIR/bin/coqui-launcher" 2>/dev/null || true
+
+    rm -rf "$tmp_dir"
+    trap - EXIT
+
+    success "Coqui updated to v${LATEST_VERSION}"
+}
+
+# ─── Dev (git) install / update ──────────────────────────────────────────────
+
+install_dev() {
     status "Cloning Coqui into ${COQUI_INSTALL_DIR}..."
 
     local clone_args="--depth 1"
@@ -567,12 +801,16 @@ install_coqui() {
     run_composer_install
 }
 
-update_coqui() {
+update_dev() {
     status "Checking for updates..."
 
     cd "$COQUI_INSTALL_DIR"
 
-    git fetch --quiet 2>/dev/null || fatal "Failed to fetch updates."
+    # Stash any local changes (e.g. modified composer.lock) before pulling
+    local stash_result
+    stash_result="$(git stash --include-untracked 2>&1)" || true
+
+    git fetch --quiet 2>/dev/null || fatal "Failed to fetch updates. Check your internet connection."
 
     local local_head remote_head
     local_head="$(git rev-parse HEAD)"
@@ -581,6 +819,11 @@ update_coqui() {
     if [ "$local_head" = "$remote_head" ]; then
         success "Coqui is already up to date"
 
+        # Restore stashed changes
+        if echo "$stash_result" | grep -q "Saved working directory"; then
+            git stash pop --quiet 2>/dev/null || true
+        fi
+
         # Still run composer install in case dependencies changed locally
         run_composer_install
         return
@@ -588,10 +831,39 @@ update_coqui() {
 
     if confirm "A new version of Coqui is available. Update now?"; then
         status "Updating Coqui..."
-        git pull --ff-only --quiet 2>/dev/null || fatal "Failed to update. Try a clean install."
+
+        # Unshallow if needed (shallow clones can fail ff-only)
+        if [ -f "$COQUI_INSTALL_DIR/.git/shallow" ]; then
+            git fetch --unshallow --quiet 2>/dev/null || true
+        fi
+
+        if ! git pull --ff-only --quiet; then
+            # Restore stash before reporting error
+            if echo "$stash_result" | grep -q "Saved working directory"; then
+                git stash pop --quiet 2>/dev/null || true
+            fi
+            fatal "Failed to update. Your local branch may have diverged. Try: rm -rf $COQUI_INSTALL_DIR && re-run the installer."
+        fi
+
         success "Coqui updated"
+
+        # Restore stashed changes — if pop fails, drop the stash since
+        # the fresh pull state is authoritative and composer install will
+        # regenerate composer.lock from the updated composer.json.
+        if echo "$stash_result" | grep -q "Saved working directory"; then
+            if ! git stash pop --quiet 2>/dev/null; then
+                warn "Could not restore local changes from stash (likely a merge conflict)."
+                warn "Dropping stash — composer install will regenerate lock file."
+                git stash drop --quiet 2>/dev/null || true
+            fi
+        fi
+
         run_composer_install
     else
+        # Restore stash if update was skipped
+        if echo "$stash_result" | grep -q "Saved working directory"; then
+            git stash pop --quiet 2>/dev/null || true
+        fi
         success "Update skipped"
     fi
 }
@@ -600,8 +872,18 @@ run_composer_install() {
     status "Installing dependencies..."
 
     cd "$COQUI_INSTALL_DIR"
-    composer install --no-dev --optimize-autoloader --no-interaction --quiet 2>/dev/null \
-        || fatal "Composer install failed."
+
+    # Remove stale lock file if it conflicts with the current composer.json
+    # (common after a git pull that changed composer.json while the old
+    # composer.lock was stashed and couldn't be restored).
+    if ! composer validate --no-check-all --no-check-publish --quiet 2>/dev/null; then
+        warn "composer.lock is out of sync — regenerating..."
+        rm -f composer.lock
+    fi
+
+    if ! composer install --no-dev --optimize-autoloader --no-interaction 2>&1; then
+        fatal "Composer install failed. Run manually: cd $COQUI_INSTALL_DIR && composer install --no-dev"
+    fi
 
     success "Dependencies installed"
 }
@@ -622,7 +904,7 @@ setup_config() {
 {
     "agents": {
         "defaults": {
-            "workspace": ".workspace",
+            "workspace": "~/.workspace",
             "models": {
                 "ollama/qwen3:latest": { "alias": "qwen" },
                 "ollama/qwen3-coder:latest": { "alias": "coder" },
@@ -748,10 +1030,17 @@ show_banner() {
 
 print_success() {
     local install_type="$1"
+    local version_info=""
+
+    if [ -n "$LATEST_VERSION" ]; then
+        version_info=" v${LATEST_VERSION}"
+    elif [ -f "$COQUI_INSTALL_DIR/.coqui-version" ]; then
+        version_info=" v$(cat "$COQUI_INSTALL_DIR/.coqui-version")"
+    fi
 
     echo ""
     echo "  ──────────────────────────────────────────"
-    echo "  ${BOLD}${GREEN}${install_type} complete!${RESET}"
+    echo "  ${BOLD}${GREEN}${install_type} complete!${version_info}${RESET}"
     echo "  ──────────────────────────────────────────"
     echo ""
     echo "  ${BOLD}Get started:${RESET}"
@@ -804,16 +1093,37 @@ main() {
             if ! available php; then
                 fatal "PHP is required to install Coqui. Re-run with --install-php or install PHP manually."
             fi
-            if ! available composer; then
-                fatal "Composer is required to install Coqui. Re-run with --install-composer or install Composer manually."
-            fi
-            check_git
 
-            if is_installed; then
-                update_coqui
+            if [ "$DEV_MODE" = true ]; then
+                # Dev mode: requires Git + Composer
+                if ! available composer; then
+                    fatal "Composer is required for --dev installs. Re-run with --install-composer or install Composer manually."
+                fi
+                check_git
+
+                if is_dev_installed; then
+                    update_dev
+                else
+                    install_dev
+                fi
             else
-                install_coqui
+                # Release mode: download pre-built archive (no Git/Composer needed)
+                if is_dev_installed; then
+                    echo ""
+                    warn "A development (git) installation was found at ${COQUI_INSTALL_DIR}"
+                    echo "  Use ${BOLD}--dev${RESET} to update it, or remove it first:"
+                    echo "    rm -rf ${COQUI_INSTALL_DIR}"
+                    echo ""
+                    fatal "Cannot install release over a dev installation."
+                fi
+
+                if is_release_installed; then
+                    update_release
+                else
+                    install_release
+                fi
             fi
+
             setup_config
             create_symlink
         fi
@@ -824,31 +1134,77 @@ main() {
         return
     fi
 
-    # ── Full install (no flags — backward compatible) ──
-    if is_installed; then
-        echo "  ${ARROW} Existing installation found at ${COQUI_INSTALL_DIR}"
-        echo ""
+    # ── Full install (no --install-* flags — backward compatible) ──
+    if [ "$DEV_MODE" = true ]; then
+        # Dev mode full install
+        if is_dev_installed; then
+            echo "  ${ARROW} Existing dev installation found at ${COQUI_INSTALL_DIR}"
+            echo ""
 
-        check_php
-        check_extensions
-        check_composer
+            check_php
+            check_extensions
+            check_composer
 
-        update_coqui
-        setup_config
-        create_symlink
+            update_dev
+            setup_config
+            create_symlink
 
-        print_success "Update"
+            print_success "Update"
+        else
+            if is_release_installed; then
+                echo ""
+                warn "A release installation was found at ${COQUI_INSTALL_DIR}"
+                echo "  Remove it first to switch to dev mode:"
+                echo "    rm -rf ${COQUI_INSTALL_DIR}"
+                echo ""
+                fatal "Cannot install dev over a release installation."
+            fi
+
+            check_php
+            check_extensions
+            check_git
+            check_composer
+
+            install_dev
+            setup_config
+            create_symlink
+
+            print_success "Installation"
+        fi
     else
-        check_php
-        check_extensions
-        check_git
-        check_composer
+        # Release mode full install (default)
+        if is_dev_installed; then
+            echo ""
+            warn "A development (git) installation was found at ${COQUI_INSTALL_DIR}"
+            echo "  To update it, re-run with ${BOLD}--dev${RESET}"
+            echo "  To switch to release mode, remove it first:"
+            echo "    rm -rf ${COQUI_INSTALL_DIR}"
+            echo ""
+            fatal "Cannot install release over a dev installation."
+        fi
 
-        install_coqui
-        setup_config
-        create_symlink
+        if is_release_installed; then
+            echo "  ${ARROW} Existing installation found at ${COQUI_INSTALL_DIR}"
+            echo ""
 
-        print_success "Installation"
+            check_php
+            check_extensions
+
+            update_release
+            setup_config
+            create_symlink
+
+            print_success "Update"
+        else
+            check_php
+            check_extensions
+
+            install_release
+            setup_config
+            create_symlink
+
+            print_success "Installation"
+        fi
     fi
 }
 
