@@ -179,15 +179,22 @@ setup_sudo() {
     fi
 }
 
-# Detect the best bin directory in PATH
+# Detect the best writable bin directory in PATH.
+# Never selects a directory that requires sudo — falls back to ~/.local/bin.
 detect_bin_dir() {
-    # Prefer /usr/local/bin if it exists and is in PATH
-    if echo "$PATH" | tr ':' '\n' | grep -qx '/usr/local/bin'; then
+    # Apple Silicon Homebrew (/opt/homebrew/bin) — user-owned, no sudo needed
+    if echo "$PATH" | tr ':' '\n' | grep -qx '/opt/homebrew/bin' && [ -w '/opt/homebrew/bin' ]; then
+        BIN_DIR="/opt/homebrew/bin"
+        return
+    fi
+
+    # Intel Homebrew / user-owned /usr/local/bin
+    if echo "$PATH" | tr ':' '\n' | grep -qx '/usr/local/bin' && [ -w '/usr/local/bin' ]; then
         BIN_DIR="/usr/local/bin"
         return
     fi
 
-    # Fall back to ~/.local/bin
+    # Safe user-local fallback — always writable, no sudo required
     BIN_DIR="$HOME/.local/bin"
 }
 
@@ -983,21 +990,8 @@ create_symlink() {
 
     status "Creating symlink in ${BIN_DIR}..."
 
-    if [ "$BIN_DIR" = "/usr/local/bin" ]; then
-        if [ -w "$BIN_DIR" ]; then
-            ln -sf "$target" "$BIN_DIR/coqui"
-        elif [ -n "$SUDO" ]; then
-            $SUDO ln -sf "$target" "$BIN_DIR/coqui"
-        else
-            # Fall back to ~/.local/bin
-            BIN_DIR="$HOME/.local/bin"
-            mkdir -p "$BIN_DIR"
-            ln -sf "$target" "$BIN_DIR/coqui"
-        fi
-    else
-        mkdir -p "$BIN_DIR"
-        ln -sf "$target" "$BIN_DIR/coqui"
-    fi
+    mkdir -p "$BIN_DIR"
+    ln -sf "$target" "$BIN_DIR/coqui"
 
     success "Symlink created: ${BIN_DIR}/coqui"
 
