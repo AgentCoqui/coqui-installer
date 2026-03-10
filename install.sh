@@ -39,6 +39,7 @@ INSTALL_PHP=false
 INSTALL_COMPOSER=false
 INSTALL_COQUI=false
 NON_INTERACTIVE=false
+QUIET_MODE=false       # true when --quiet is passed (minimal output)
 SELECTIVE_MODE=false   # true when any --install-* flag is passed
 DEV_MODE=false         # true when --dev is passed (git clone instead of release)
 
@@ -60,6 +61,8 @@ parse_args() {
                 DEV_MODE=true; shift ;;
             --non-interactive)
                 NON_INTERACTIVE=true; shift ;;
+            --quiet|-q)
+                QUIET_MODE=true; shift ;;
             --help|-h)
                 show_usage; exit 0 ;;
             *)
@@ -86,6 +89,7 @@ show_usage() {
     echo "  --install-coqui        Install/update Coqui and create symlink"
     echo "  --dev                  Use git clone instead of release download (for development)"
     echo "  --non-interactive      Skip all confirmation prompts (assume yes)"
+    echo "  --quiet, -q            Minimal output (milestones and errors only)"
     echo "  --help, -h             Show this help"
     echo ""
     echo "By default, the installer downloads the latest GitHub release."
@@ -131,11 +135,12 @@ TICK="${GREEN}✓${RESET}"
 CROSS="${RED}✗${RESET}"
 ARROW="${CYAN}▸${RESET}"
 
-status()  { echo "  ${ARROW} $*"; }
-success() { echo "  ${TICK} $*"; }
+status()  { [ "$QUIET_MODE" = true ] && return; echo "  ${ARROW} $*"; }
+success() { [ "$QUIET_MODE" = true ] && return; echo "  ${TICK} $*"; }
 warn()    { echo "  ${YELLOW}! $*${RESET}"; }
 error()   { echo "  ${CROSS} ${RED}$*${RESET}" >&2; }
 fatal()   { error "$@"; exit 1; }
+progress() { echo "  ${ARROW} $*"; }  # always prints, even in quiet mode
 
 # ─── Utility functions ───────────────────────────────────────────────────────
 
@@ -174,15 +179,22 @@ setup_sudo() {
     fi
 }
 
-# Detect the best bin directory in PATH
+# Detect the best writable bin directory in PATH.
+# Never selects a directory that requires sudo — falls back to ~/.local/bin.
 detect_bin_dir() {
-    # Prefer /usr/local/bin if it exists and is in PATH
-    if echo "$PATH" | tr ':' '\n' | grep -qx '/usr/local/bin'; then
+    # Apple Silicon Homebrew (/opt/homebrew/bin) — user-owned, no sudo needed
+    if echo "$PATH" | tr ':' '\n' | grep -qx '/opt/homebrew/bin' && [ -w '/opt/homebrew/bin' ]; then
+        BIN_DIR="/opt/homebrew/bin"
+        return
+    fi
+
+    # Intel Homebrew / user-owned /usr/local/bin
+    if echo "$PATH" | tr ':' '\n' | grep -qx '/usr/local/bin' && [ -w '/usr/local/bin' ]; then
         BIN_DIR="/usr/local/bin"
         return
     fi
 
-    # Fall back to ~/.local/bin
+    # Safe user-local fallback — always writable, no sudo required
     BIN_DIR="$HOME/.local/bin"
 }
 
@@ -738,20 +750,17 @@ update_release() {
     if [ -f "$COQUI_INSTALL_DIR/openclaw.json" ]; then
         cp "$COQUI_INSTALL_DIR/openclaw.json" "${tmp_dir}/openclaw.json.bak"
     fi
-    # Back up workspace — check both legacy location and home directory
-    if [ -d "$COQUI_INSTALL_DIR/.workspace" ]; then
-        cp -a "$COQUI_INSTALL_DIR/.workspace" "${tmp_dir}/.workspace-legacy.bak"
-    fi
-    if [ -d "$HOME/.workspace" ]; then
-        cp -a "$HOME/.workspace" "${tmp_dir}/.workspace-home.bak"
+    # Back up workspace directory
+    if [ -d "$COQUI_INSTALL_DIR/workspace" ]; then
+        cp -a "$COQUI_INSTALL_DIR/workspace" "${tmp_dir}/workspace.bak"
     fi
 
     # Extract new release
     tar -xzf "${tmp_dir}/${archive_name}" -C "$tmp_dir"
 
-    # Remove old files (except hidden user data we already backed up)
+    # Remove old files (except user data we already backed up)
     find "$COQUI_INSTALL_DIR" -mindepth 1 -maxdepth 1 \
-        ! -name '.workspace' \
+        ! -name 'workspace' \
         ! -name 'openclaw.json' \
         -exec rm -rf {} + 2>/dev/null || true
 
@@ -762,12 +771,10 @@ update_release() {
     if [ -f "${tmp_dir}/openclaw.json.bak" ]; then
         cp "${tmp_dir}/openclaw.json.bak" "$COQUI_INSTALL_DIR/openclaw.json"
     fi
-    # Restore workspace — legacy location preserved in install dir, home workspace is untouched
-    if [ -d "${tmp_dir}/.workspace-legacy.bak" ]; then
-        mkdir -p "$COQUI_INSTALL_DIR/.workspace"
-        cp -a "${tmp_dir}/.workspace-legacy.bak/." "$COQUI_INSTALL_DIR/.workspace/"
+    if [ -d "${tmp_dir}/workspace.bak" ]; then
+        mkdir -p "$COQUI_INSTALL_DIR/workspace"
+        cp -a "${tmp_dir}/workspace.bak/." "$COQUI_INSTALL_DIR/workspace/"
     fi
-    # Home workspace (~/.workspace) is never deleted during upgrade — no restore needed
 
     # Write version marker
     echo "$LATEST_VERSION" > "$COQUI_INSTALL_DIR/.coqui-version"
@@ -904,7 +911,7 @@ setup_config() {
 {
     "agents": {
         "defaults": {
-            "workspace": "~/.workspace",
+            "workspace": "~/.coqui/workspace",
             "models": {
                 "ollama/qwen3:latest": { "alias": "qwen" },
                 "ollama/qwen3-coder:latest": { "alias": "coder" },
@@ -983,21 +990,8 @@ create_symlink() {
 
     status "Creating symlink in ${BIN_DIR}..."
 
-    if [ "$BIN_DIR" = "/usr/local/bin" ]; then
-        if [ -w "$BIN_DIR" ]; then
-            ln -sf "$target" "$BIN_DIR/coqui"
-        elif [ -n "$SUDO" ]; then
-            $SUDO ln -sf "$target" "$BIN_DIR/coqui"
-        else
-            # Fall back to ~/.local/bin
-            BIN_DIR="$HOME/.local/bin"
-            mkdir -p "$BIN_DIR"
-            ln -sf "$target" "$BIN_DIR/coqui"
-        fi
-    else
-        mkdir -p "$BIN_DIR"
-        ln -sf "$target" "$BIN_DIR/coqui"
-    fi
+    mkdir -p "$BIN_DIR"
+    ln -sf "$target" "$BIN_DIR/coqui"
 
     success "Symlink created: ${BIN_DIR}/coqui"
 
@@ -1015,12 +1009,15 @@ create_symlink() {
 
 # ─── Banner ──────────────────────────────────────────────────────────────────
 
+
 show_banner() {
+    if [ "$QUIET_MODE" = true ]; then return; fi
     echo ""
-    echo "  ${BOLD}${GREEN}▄█████  ▄▄▄   ▄▄▄  ▄▄ ▄▄ ▄▄   █████▄  ▄▄▄ ▄▄▄▄▄▄${RESET}"
-    echo "  ${BOLD}${GREEN}██     ██▀██ ██▀██ ██ ██ ██   ██▄▄██ ██▀██  ██  ${RESET}"
-    echo "  ${BOLD}${GREEN}▀█████ ▀███▀ ▀███▀ ▀███▀ ██   ██▄▄█▀ ▀███▀  ██  ${RESET}"
-    echo "  ${BOLD}${GREEN}                ▀▀                              ${RESET}"
+    echo "  ${GREEN} ▄▄·       .▄▄▄  ▄• ▄▌▪  ▄▄▄▄·       ▄▄▄▄▄${RESET}"
+    echo "  ${GREEN}▐█ ▌▪▪     ▐▀•▀█ █▪██▌██ ▐█ ▀█▪▪     •██  ${RESET}"
+    echo "  ${GREEN}██ ▄▄ ▄█▀▄ █▌·.█▌█▌▐█▌▐█·▐█▀▀█▄ ▄█▀▄  ▐█.▪${RESET}"
+    echo "  ${GREEN}▐███▌▐█▌.▐▌▐█▪▄█·▐█▄█▌▐█▌██▄▪▐█▐█▌.▐▌ ▐█▌·${RESET}"
+    echo "  ${GREEN}·▀▀▀  ▀█▄▀▪·▀▀█.  ▀▀▀ ▀▀▀·▀▀▀▀  ▀█▄▀▪ ▀▀▀ ${RESET}"
     echo ""
     echo "  ${BOLD}Coqui Installer${RESET}"
     echo ""
@@ -1036,6 +1033,11 @@ print_success() {
         version_info=" v${LATEST_VERSION}"
     elif [ -f "$COQUI_INSTALL_DIR/.coqui-version" ]; then
         version_info=" v$(cat "$COQUI_INSTALL_DIR/.coqui-version")"
+    fi
+
+    if [ "$QUIET_MODE" = true ]; then
+        progress "${install_type} complete!${version_info}"
+        return
     fi
 
     echo ""

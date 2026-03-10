@@ -22,7 +22,8 @@
 #>
 
 param(
-    [switch]$Dev
+    [switch]$Dev,
+    [switch]$Quiet
 )
 
 $ErrorActionPreference = "Continue"
@@ -50,6 +51,7 @@ $REQUIRED_EXTENSIONS = @("curl", "mbstring", "openssl", "pdo_sqlite", "xml", "zi
 
 # Mode flag
 $script:DEV_MODE = $Dev.IsPresent
+$script:QUIET_MODE = $Quiet.IsPresent
 
 # Resolved at runtime
 $script:LATEST_VERSION = ""
@@ -58,12 +60,19 @@ $script:LATEST_VERSION = ""
 
 function Write-Status {
     param([string]$Message)
+    if ($script:QUIET_MODE) { return }
     Write-Host -Object "  $([char]0x25B8) $Message" -ForegroundColor Cyan
 }
 
 function Write-Success {
     param([string]$Message)
+    if ($script:QUIET_MODE) { return }
     Write-Host -Object "  $([char]0x2713) $Message" -ForegroundColor Green
+}
+
+function Write-Progress {
+    param([string]$Message)
+    Write-Host -Object "  $([char]0x25B8) $Message" -ForegroundColor Cyan
 }
 
 function Write-Warn {
@@ -568,25 +577,21 @@ function Update-Release {
         # Back up user data before replacing
         Write-Status "Backing up user data..."
         $ConfigFile = Join-Path $COQUI_INSTALL_DIR "openclaw.json"
-        $LegacyWorkspaceDir = Join-Path $COQUI_INSTALL_DIR ".workspace"
-        $HomeWorkspaceDir = Join-Path $HOME ".workspace"
+        $WorkspaceDir = Join-Path $COQUI_INSTALL_DIR "workspace"
 
         if (Test-Path $ConfigFile) {
             Copy-Item -Path $ConfigFile -Destination (Join-Path $TempDir "openclaw.json.bak") -Force
         }
-        # Back up workspace — check both legacy location and home directory
-        if (Test-Path $LegacyWorkspaceDir) {
-            Copy-Item -Path $LegacyWorkspaceDir -Destination (Join-Path $TempDir ".workspace-legacy.bak") -Recurse -Force
-        }
-        if (Test-Path $HomeWorkspaceDir) {
-            Copy-Item -Path $HomeWorkspaceDir -Destination (Join-Path $TempDir ".workspace-home.bak") -Recurse -Force
+        # Back up workspace directory
+        if (Test-Path $WorkspaceDir) {
+            Copy-Item -Path $WorkspaceDir -Destination (Join-Path $TempDir "workspace.bak") -Recurse -Force
         }
 
         # Extract new release
         Expand-Archive -Path $ArchivePath -DestinationPath $TempDir -Force
 
-        # Remove old files (except hidden user data we already backed up)
-        Get-ChildItem -Path $COQUI_INSTALL_DIR -Exclude ".workspace", "openclaw.json" |
+        # Remove old files (except user data we already backed up)
+        Get-ChildItem -Path $COQUI_INSTALL_DIR -Exclude "workspace", "openclaw.json" |
             Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
         # Install new release
@@ -597,20 +602,19 @@ function Update-Release {
 
         # Restore user data (overwrite any defaults from new release)
         $ConfigBackup = Join-Path $TempDir "openclaw.json.bak"
-        $LegacyWorkspaceBackup = Join-Path $TempDir ".workspace-legacy.bak"
+        $WorkspaceBackup = Join-Path $TempDir "workspace.bak"
 
         if (Test-Path $ConfigBackup) {
             Copy-Item -Path $ConfigBackup -Destination $ConfigFile -Force
         }
-        # Restore legacy workspace in install dir if it existed
-        if (Test-Path $LegacyWorkspaceBackup) {
-            $LegacyWorkspaceDir = Join-Path $COQUI_INSTALL_DIR ".workspace"
-            if (-not (Test-Path $LegacyWorkspaceDir)) {
-                New-Item -ItemType Directory -Path $LegacyWorkspaceDir -Force | Out-Null
+        # Restore workspace if it existed
+        if (Test-Path $WorkspaceBackup) {
+            $WorkspaceDir = Join-Path $COQUI_INSTALL_DIR "workspace"
+            if (-not (Test-Path $WorkspaceDir)) {
+                New-Item -ItemType Directory -Path $WorkspaceDir -Force | Out-Null
             }
-            Copy-Item -Path "$LegacyWorkspaceBackup\*" -Destination $LegacyWorkspaceDir -Recurse -Force
+            Copy-Item -Path "$WorkspaceBackup\*" -Destination $WorkspaceDir -Recurse -Force
         }
-        # Home workspace (~/.workspace) is never deleted during upgrade — no restore needed
 
         # Write version marker
         Set-Content -Path (Join-Path $COQUI_INSTALL_DIR ".coqui-version") -Value $script:LATEST_VERSION
@@ -773,7 +777,7 @@ function Setup-Config {
 {
     "agents": {
         "defaults": {
-            "workspace": "~/.workspace",
+            "workspace": "~/.coqui/workspace",
             "models": {
                 "ollama/qwen3:latest": { "alias": "qwen" },
                 "ollama/qwen3-coder:latest": { "alias": "coder" },
@@ -861,11 +865,13 @@ function Create-SymlinkWrapper {
 # ─── Banner ──────────────────────────────────────────────────────────────────
 
 function Show-Banner {
+    if ($script:QUIET_MODE) { return }
     Write-Host ""
-    Write-Host -Object "  ▄█████  ▄▄▄   ▄▄▄  ▄▄ ▄▄ ▄▄   █████▄  ▄▄▄ ▄▄▄▄▄▄" -ForegroundColor Green
-    Write-Host -Object "  ██     ██▀██ ██▀██ ██ ██ ██   ██▄▄██ ██▀██  ██  " -ForegroundColor Green
-    Write-Host -Object "  ▀█████ ▀███▀ ▀███▀ ▀███▀ ██   ██▄▄█▀ ▀███▀  ██  " -ForegroundColor Green
-    Write-Host -Object "                  ▀▀                              " -ForegroundColor Green
+    Write-Host -Object "   ▄▄·       .▄▄▄  ▄• ▄▌▪  ▄▄▄▄·       ▄▄▄▄▄" -ForegroundColor Green
+    Write-Host -Object "  ▐█ ▌▪▪     ▐▀•▀█ █▪██▌██ ▐█ ▀█▪▪     •██  " -ForegroundColor Green
+    Write-Host -Object "  ██ ▄▄ ▄█▀▄ █▌·.█▌█▌▐█▌▐█·▐█▀▀█▄ ▄█▀▄  ▐█.▪" -ForegroundColor Green
+    Write-Host -Object "  ▐███▌▐█▌.▐▌▐█▪▄█·▐█▄█▌▐█▌██▄▪▐█▐█▌.▐▌ ▐█▌·" -ForegroundColor Green
+    Write-Host -Object "  ·▀▀▀  ▀█▄▀▪·▀▀█.  ▀▀▀ ▀▀▀·▀▀▀▀  ▀█▄▀▪ ▀▀▀ " -ForegroundColor Green
     Write-Host ""
     Write-Host "  Coqui Installer (Windows)"
     Write-Host ""
@@ -883,6 +889,13 @@ function Print-Success {
         $VersionFile = Join-Path $COQUI_INSTALL_DIR ".coqui-version"
         if (Test-Path $VersionFile) {
             $VersionInfo = " v$((Get-Content -Path $VersionFile -Raw).Trim())"
+        }
+    }
+
+    if ($script:QUIET_MODE) {
+        Write-Progress "${InstallType} complete!${VersionInfo}"
+        return
+    }
         }
     }
 
