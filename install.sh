@@ -738,20 +738,17 @@ update_release() {
     if [ -f "$COQUI_INSTALL_DIR/openclaw.json" ]; then
         cp "$COQUI_INSTALL_DIR/openclaw.json" "${tmp_dir}/openclaw.json.bak"
     fi
-    # Back up workspace — check both legacy location and home directory
-    if [ -d "$COQUI_INSTALL_DIR/.workspace" ]; then
-        cp -a "$COQUI_INSTALL_DIR/.workspace" "${tmp_dir}/.workspace-legacy.bak"
-    fi
-    if [ -d "$HOME/.workspace" ]; then
-        cp -a "$HOME/.workspace" "${tmp_dir}/.workspace-home.bak"
+    # Back up workspace directory
+    if [ -d "$COQUI_INSTALL_DIR/workspace" ]; then
+        cp -a "$COQUI_INSTALL_DIR/workspace" "${tmp_dir}/workspace.bak"
     fi
 
     # Extract new release
     tar -xzf "${tmp_dir}/${archive_name}" -C "$tmp_dir"
 
-    # Remove old files (except hidden user data we already backed up)
+    # Remove old files (except user data we already backed up)
     find "$COQUI_INSTALL_DIR" -mindepth 1 -maxdepth 1 \
-        ! -name '.workspace' \
+        ! -name 'workspace' \
         ! -name 'openclaw.json' \
         -exec rm -rf {} + 2>/dev/null || true
 
@@ -762,12 +759,10 @@ update_release() {
     if [ -f "${tmp_dir}/openclaw.json.bak" ]; then
         cp "${tmp_dir}/openclaw.json.bak" "$COQUI_INSTALL_DIR/openclaw.json"
     fi
-    # Restore workspace — legacy location preserved in install dir, home workspace is untouched
-    if [ -d "${tmp_dir}/.workspace-legacy.bak" ]; then
-        mkdir -p "$COQUI_INSTALL_DIR/.workspace"
-        cp -a "${tmp_dir}/.workspace-legacy.bak/." "$COQUI_INSTALL_DIR/.workspace/"
+    if [ -d "${tmp_dir}/workspace.bak" ]; then
+        mkdir -p "$COQUI_INSTALL_DIR/workspace"
+        cp -a "${tmp_dir}/workspace.bak/." "$COQUI_INSTALL_DIR/workspace/"
     fi
-    # Home workspace (~/.workspace) is never deleted during upgrade — no restore needed
 
     # Write version marker
     echo "$LATEST_VERSION" > "$COQUI_INSTALL_DIR/.coqui-version"
@@ -904,7 +899,7 @@ setup_config() {
 {
     "agents": {
         "defaults": {
-            "workspace": "~/.workspace",
+            "workspace": "~/.coqui/workspace",
             "models": {
                 "ollama/qwen3:latest": { "alias": "qwen" },
                 "ollama/qwen3-coder:latest": { "alias": "coder" },
