@@ -129,19 +129,66 @@ Additional requirements for `--dev` mode only:
 
 ## Uninstall
 
-### Linux / macOS
+The uninstaller removes Coqui, its symlinks/wrappers, and PATH entries. By default it prompts before deleting workspace data and does **not** remove PHP or Composer.
+
+### Linux / macOS / WSL2
 
 ```bash
-rm -rf ~/.coqui
-sudo rm -f /usr/local/bin/coqui
+curl -fsSL https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/uninstall.sh | bash
 ```
 
-### Windows
+### Windows (PowerShell)
 
 ```powershell
-Remove-Item -Recurse -Force $HOME\.coqui
-Remove-Item -Force "$env:LOCALAPPDATA\Programs\Coqui\bin\coqui.bat"
+irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/uninstall.ps1 | iex
 ```
+
+### Uninstall flags
+
+| Flag (bash) | Flag (PowerShell) | Description |
+| ----------- | ----------------- | ----------- |
+| `--keep-workspace` | `-KeepWorkspace` | Preserve the workspace directory (`~/.coqui/.workspace`) |
+| `--force` | `-Force` | Skip all confirmation prompts (removes Coqui + workspace) |
+| `--all` | `-All` | Also remove PHP and Composer installed by Coqui |
+| `--quiet`, `-q` | `-Quiet` | Minimal output |
+| `--help`, `-h` | `-Help` | Show usage |
+
+### Uninstall examples
+
+```bash
+# Interactive (prompts for workspace)
+./uninstall.sh
+
+# Keep workspace for future reinstall
+./uninstall.sh --keep-workspace
+
+# Remove everything without prompts
+./uninstall.sh --force
+
+# Remove everything including PHP and Composer, no prompts
+./uninstall.sh --force --all
+```
+
+```powershell
+# Interactive
+.\uninstall.ps1
+
+# Remove everything including PHP and Composer
+.\uninstall.ps1 -Force -All
+```
+
+### What gets removed
+
+| Component | Default | `--force` | `--all` |
+| --------- | ------- | --------- | ------- |
+| Coqui install directory | Yes | Yes | Yes |
+| Symlink / wrapper | Yes | Yes | Yes |
+| PATH entry (Windows) | Yes | Yes | Yes |
+| Workspace data | Prompt (default: keep) | Yes | Yes |
+| PHP | No | No | Prompt (default: no) |
+| Composer | No | No | Prompt (default: no) |
+
+With `--force --all`, everything is removed without prompts.
 
 ## License
 
