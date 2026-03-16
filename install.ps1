@@ -70,7 +70,7 @@ function Write-Success {
     Write-Host -Object "  $([char]0x2713) $Message" -ForegroundColor Green
 }
 
-function Write-Progress {
+function Write-Milestone {
     param([string]$Message)
     Write-Host -Object "  $([char]0x25B8) $Message" -ForegroundColor Cyan
 }
@@ -728,7 +728,7 @@ function Run-ComposerInstall {
     Set-Location $COQUI_INSTALL_DIR
 
     # Remove stale lock file if it conflicts with the current composer.json
-    $ValidateOutput = & composer validate --no-check-all --no-check-publish 2>&1
+    $null = & composer validate --no-check-all --no-check-publish 2>&1
     if ($LASTEXITCODE -ne 0) {
         Write-Warn "composer.lock is out of sync — regenerating..."
         $LockFile = Join-Path $COQUI_INSTALL_DIR "composer.lock"
@@ -800,10 +800,8 @@ function Print-Success {
     }
 
     if ($script:QUIET_MODE) {
-        Write-Progress "${InstallType} complete!${VersionInfo}"
+        Write-Milestone "${InstallType} complete!${VersionInfo}"
         return
-    }
-        }
     }
 
     Write-Host ""

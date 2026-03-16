@@ -79,7 +79,7 @@ function Write-Success {
     Write-Host -Object "  $([char]0x2713) $Message" -ForegroundColor Green
 }
 
-function Write-Progress {
+function Write-Milestone {
     param([string]$Message)
     Write-Host -Object "  $([char]0x25B8) $Message" -ForegroundColor Cyan
 }
@@ -421,7 +421,7 @@ function Show-Banner {
 
 function Print-Summary {
     if ($script:QUIET_MODE) {
-        Write-Progress "Uninstall complete"
+        Write-Milestone "Uninstall complete"
         return
     }
 
