@@ -7,8 +7,8 @@
     Removes Coqui and associated files from a Windows system.
     Optionally removes PHP and Composer with the -All flag.
 
-.PARAMETER KeepWorkspace
-    Preserve the workspace directory during uninstallation.
+.PARAMETER RemoveWorkspace
+    Delete the workspace directory during uninstallation.
 
 .PARAMETER Force
     Skip all confirmation prompts.
@@ -27,8 +27,8 @@
     .\uninstall.ps1
 
 .EXAMPLE
-    # Keep workspace data
-    .\uninstall.ps1 -KeepWorkspace
+    # Remove workspace data
+    .\uninstall.ps1 -RemoveWorkspace
 
 .EXAMPLE
     # Remove everything without prompts
@@ -40,7 +40,7 @@
 #>
 
 param(
-    [switch]$KeepWorkspace,
+    [switch]$RemoveWorkspace,
     [switch]$Force,
     [switch]$All,
     [switch]$Quiet,
@@ -60,7 +60,7 @@ $PHP_MAJOR = 8
 $PHP_MINOR = 4
 
 # Mode flags
-$script:KEEP_WORKSPACE = $KeepWorkspace.IsPresent
+$script:REMOVE_WORKSPACE = $RemoveWorkspace.IsPresent
 $script:FORCE_MODE = $Force.IsPresent
 $script:ALL_MODE = $All.IsPresent
 $script:QUIET_MODE = $Quiet.IsPresent
@@ -141,20 +141,19 @@ function Show-Usage {
     Write-Host "Removes Coqui and associated files from your system."
     Write-Host ""
     Write-Host "Flags:"
-    Write-Host "  -KeepWorkspace       Preserve the workspace directory"
+    Write-Host "  -RemoveWorkspace     Delete the workspace directory"
     Write-Host "  -Force               Skip all confirmation prompts"
     Write-Host "  -All                 Also remove PHP and Composer installed by Coqui"
     Write-Host "  -Quiet               Minimal output (milestones and errors only)"
     Write-Host "  -Help                Show this help"
     Write-Host ""
-    Write-Host "By default, the uninstaller prompts before deleting the workspace"
-    Write-Host "(default: keep) and does NOT remove PHP or Composer."
+    Write-Host "By default, the uninstaller preserves workspace data and does NOT remove PHP or Composer."
     Write-Host ""
     Write-Host "Examples:"
-    Write-Host "  .\uninstall.ps1                    # Interactive uninstall"
-    Write-Host "  .\uninstall.ps1 -KeepWorkspace     # Keep workspace data"
-    Write-Host "  .\uninstall.ps1 -Force             # No prompts, remove Coqui + workspace"
-    Write-Host "  .\uninstall.ps1 -Force -All        # No prompts, remove everything"
+    Write-Host "  .\uninstall.ps1                      # Interactive uninstall (workspace preserved)"
+    Write-Host "  .\uninstall.ps1 -RemoveWorkspace     # Remove workspace data too"
+    Write-Host "  .\uninstall.ps1 -Force               # No prompts, preserve workspace"
+    Write-Host "  .\uninstall.ps1 -Force -All          # No prompts, remove everything"
 }
 
 # ─── Installation detection ──────────────────────────────────────────────────
@@ -274,26 +273,14 @@ function Remove-InstallDir {
     $WorkspaceDir = Join-Path $COQUI_INSTALL_DIR ".workspace"
     $DeleteWorkspace = $false
 
-    if ($script:KEEP_WORKSPACE) {
-        # Explicit flag: keep workspace
-        Write-Status "Workspace will be preserved (-KeepWorkspace)"
-    } elseif ($script:FORCE_MODE) {
-        # Force mode without -KeepWorkspace: delete workspace
+    if ($script:REMOVE_WORKSPACE) {
+        # Explicit flag: remove workspace
         $DeleteWorkspace = $true
     } elseif (Test-Path $WorkspaceDir) {
-        # Interactive: prompt user (default is to keep)
-        Write-Host ""
-        Write-Host "  Workspace directory: $WorkspaceDir"
-        Write-Host "  Contains session data, installed packages, and agent configuration."
-        Write-Host ""
-        if (Confirm-Action -Prompt "Delete workspace data?" -Default "no") {
-            $DeleteWorkspace = $true
-        } else {
-            Write-Status "Workspace will be preserved"
-        }
+        Write-Status "Workspace will be preserved (use -RemoveWorkspace to delete)"
     }
 
-    if ($DeleteWorkspace -or ($script:FORCE_MODE -and -not $script:KEEP_WORKSPACE)) {
+    if ($DeleteWorkspace) {
         # Delete everything
         Write-Status "Removing $COQUI_INSTALL_DIR..."
         Remove-Item -Path $COQUI_INSTALL_DIR -Recurse -Force

@@ -128,7 +128,7 @@ Additional requirements for `--dev` mode only:
 
 ## Uninstall
 
-The uninstaller removes Coqui, its symlinks/wrappers, and PATH entries. By default it prompts before deleting workspace data and does **not** remove PHP or Composer.
+The uninstaller removes Coqui, its symlinks/wrappers, and PATH entries. By default it preserves workspace data and does **not** remove PHP or Composer.
 
 ### Linux / macOS / WSL2
 
@@ -144,24 +144,24 @@ irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/uninstall.
 
 ### Uninstall flags
 
-| Flag (bash)        | Flag (PowerShell) | Description                                               |
-| ------------------ | ----------------- | --------------------------------------------------------- |
-| `--keep-workspace` | `-KeepWorkspace`  | Preserve the workspace directory (`~/.coqui/.workspace`)  |
-| `--force`          | `-Force`          | Skip all confirmation prompts (removes Coqui + workspace) |
-| `--all`            | `-All`            | Also remove PHP and Composer installed by Coqui           |
-| `--quiet`, `-q`    | `-Quiet`          | Minimal output                                            |
-| `--help`, `-h`     | `-Help`           | Show usage                                                |
+| Flag (bash)          | Flag (PowerShell)  | Description                                            |
+| -------------------- | ------------------ | ------------------------------------------------------ |
+| `--remove-workspace` | `-RemoveWorkspace` | Delete the workspace directory (`~/.coqui/.workspace`) |
+| `--force`            | `-Force`           | Skip all confirmation prompts                          |
+| `--all`              | `-All`             | Also remove PHP and Composer installed by Coqui        |
+| `--quiet`, `-q`      | `-Quiet`           | Minimal output                                         |
+| `--help`, `-h`       | `-Help`            | Show usage                                             |
 
 ### Uninstall examples
 
 ```bash
-# Interactive (prompts for workspace)
+# Interactive (workspace preserved by default)
 ./uninstall.sh
 
-# Keep workspace for future reinstall
-./uninstall.sh --keep-workspace
+# Remove workspace data too
+./uninstall.sh --remove-workspace
 
-# Remove everything without prompts
+# Remove everything without prompts (workspace preserved)
 ./uninstall.sh --force
 
 # Remove everything including PHP and Composer, no prompts
@@ -169,8 +169,11 @@ irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/uninstall.
 ```
 
 ```powershell
-# Interactive
+# Interactive (workspace preserved by default)
 .\uninstall.ps1
+
+# Remove workspace data too
+.\uninstall.ps1 -RemoveWorkspace
 
 # Remove everything including PHP and Composer
 .\uninstall.ps1 -Force -All
@@ -178,16 +181,16 @@ irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/uninstall.
 
 ### What gets removed
 
-| Component               | Default                | `--force` | `--all`              |
-| ----------------------- | ---------------------- | --------- | -------------------- |
-| Coqui install directory | Yes                    | Yes       | Yes                  |
-| Symlink / wrapper       | Yes                    | Yes       | Yes                  |
-| PATH entry (Windows)    | Yes                    | Yes       | Yes                  |
-| Workspace data          | Prompt (default: keep) | Yes       | Yes                  |
-| PHP                     | No                     | No        | Prompt (default: no) |
-| Composer                | No                     | No        | Prompt (default: no) |
+| Component               | Default | `--force` | `--all`              | `--remove-workspace` |
+| ----------------------- | ------- | --------- | -------------------- | -------------------- |
+| Coqui install directory | Yes     | Yes       | Yes                  | Yes                  |
+| Symlink / wrapper       | Yes     | Yes       | Yes                  | Yes                  |
+| PATH entry (Windows)    | Yes     | Yes       | Yes                  | Yes                  |
+| Workspace data          | Kept    | Kept      | Kept                 | Yes                  |
+| PHP                     | No      | No        | Prompt (default: no) | No                   |
+| Composer                | No      | No        | Prompt (default: no) | No                   |
 
-With `--force --all`, everything is removed without prompts.
+With `--force --all`, PHP and Composer are removed without prompts. Add `--remove-workspace` to also delete workspace data.
 
 ## License
 
