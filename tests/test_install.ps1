@@ -17,7 +17,7 @@ Describe "install.ps1 argument parsing" {
 
     It "-Help output contains usage instructions" {
         $result = & pwsh -NonInteractive -NoProfile -File $InstallScript -Help 2>&1
-        $result | Should -Match "Usage|Synopsis|irm"
+        ($result -join "`n") | Should -Match "Usage|Synopsis|irm"
     }
 }
 
