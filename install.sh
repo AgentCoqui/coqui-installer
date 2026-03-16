@@ -745,11 +745,6 @@ update_release() {
 
     verify_checksum "${tmp_dir}/${archive_name}" "$checksum_url"
 
-    # Back up user data before replacing
-    status "Backing up user data..."
-    if [ -f "$COQUI_INSTALL_DIR/openclaw.json" ]; then
-        cp "$COQUI_INSTALL_DIR/openclaw.json" "${tmp_dir}/openclaw.json.bak"
-    fi
     # Back up workspace directory
     if [ -d "$COQUI_INSTALL_DIR/.workspace" ]; then
         cp -a "$COQUI_INSTALL_DIR/.workspace" "${tmp_dir}/.workspace.bak"
@@ -761,16 +756,12 @@ update_release() {
     # Remove old files (except user data we already backed up)
     find "$COQUI_INSTALL_DIR" -mindepth 1 -maxdepth 1 \
         ! -name '.workspace' \
-        ! -name 'openclaw.json' \
         -exec rm -rf {} + 2>/dev/null || true
 
     # Install new release
     cp -a "${tmp_dir}/coqui/." "$COQUI_INSTALL_DIR/"
 
     # Restore user data (overwrite any defaults from new release)
-    if [ -f "${tmp_dir}/openclaw.json.bak" ]; then
-        cp "${tmp_dir}/openclaw.json.bak" "$COQUI_INSTALL_DIR/openclaw.json"
-    fi
     if [ -d "${tmp_dir}/.workspace.bak" ]; then
         mkdir -p "$COQUI_INSTALL_DIR/.workspace"
         cp -a "${tmp_dir}/.workspace.bak/." "$COQUI_INSTALL_DIR/.workspace/"
@@ -895,89 +886,6 @@ run_composer_install() {
     success "Dependencies installed"
 }
 
-# ─── Configuration ───────────────────────────────────────────────────────────
-
-setup_config() {
-    local config_file="${COQUI_INSTALL_DIR}/openclaw.json"
-
-    if [ -f "$config_file" ]; then
-        success "Configuration file exists (preserved)"
-        return
-    fi
-
-    status "Creating default configuration..."
-
-    cat > "$config_file" << 'CONFIGEOF'
-{
-    "agents": {
-        "defaults": {
-            "workspace": "~/.coqui/.workspace",
-            "models": {
-                "ollama/qwen3:latest": { "alias": "qwen" },
-                "ollama/qwen3-coder:latest": { "alias": "coder" },
-                "ollama/glm-4.7-flash:latest": { "alias": "glm" },
-                "ollama/llama3.2:latest": { "alias": "llama" }
-            },
-            "model": {
-                "primary": "ollama/glm-4.7-flash:latest",
-                "fallbacks": ["ollama/qwen3-coder:latest"]
-            },
-            "roles": {
-                "orchestrator": "ollama/glm-4.7-flash:latest",
-                "coder": "ollama/qwen3-coder:latest",
-                "reviewer": "ollama/qwen3:latest"
-            }
-        }
-    },
-    "models": {
-        "providers": {
-            "ollama": {
-                "baseUrl": "http://localhost:11434/v1",
-                "apiKey": "ollama-local",
-                "api": "openai-completions",
-                "models": [
-                    {
-                        "id": "qwen3:latest",
-                        "name": "Qwen 3",
-                        "reasoning": false,
-                        "input": ["text"],
-                        "contextWindow": 128000,
-                        "maxTokens": 8192
-                    },
-                    {
-                        "id": "qwen3-coder:latest",
-                        "name": "Qwen 3 Coder",
-                        "reasoning": false,
-                        "input": ["text"],
-                        "contextWindow": 128000,
-                        "maxTokens": 8192
-                    },
-                    {
-                        "id": "glm-4.7-flash:latest",
-                        "name": "GLM 4.7 Flash",
-                        "reasoning": false,
-                        "input": ["text"],
-                        "contextWindow": 128000,
-                        "maxTokens": 8192
-                    },
-                    {
-                        "id": "llama3.2:latest",
-                        "name": "Llama 3.2",
-                        "reasoning": false,
-                        "input": ["text"],
-                        "contextWindow": 128000,
-                        "maxTokens": 4096
-                    }
-                ]
-            }
-        }
-    }
-}
-CONFIGEOF
-
-    success "Default configuration created (Ollama local provider)"
-}
-
 # ─── Symlink ─────────────────────────────────────────────────────────────────
 
 create_symlink() {
@@ -1048,10 +956,6 @@ print_success() {
     echo "  ${BOLD}Get started:${RESET}"
     echo ""
     echo "    coqui"
-    echo ""
-    echo "  ${BOLD}Configuration:${RESET}"
-    echo ""
-    echo "    ${COQUI_INSTALL_DIR}/openclaw.json"
     echo ""
     echo "  ${BOLD}Add cloud providers${RESET} (optional):"
     echo ""
@@ -1126,7 +1030,6 @@ main() {
                 fi
             fi
 
-            setup_config
             create_symlink
         fi
 
@@ -1148,7 +1051,6 @@ main() {
             check_composer
 
             update_dev
-            setup_config
             create_symlink
 
             print_success "Update"
@@ -1168,7 +1070,6 @@ main() {
             check_composer
 
             install_dev
-            setup_config
             create_symlink
 
             print_success "Installation"
@@ -1193,7 +1094,6 @@ main() {
             check_extensions
 
             update_release
-            setup_config
             create_symlink
 
             print_success "Update"
@@ -1202,7 +1102,6 @@ main() {
             check_extensions
 
             install_release
-            setup_config
             create_symlink
 
             print_success "Installation"

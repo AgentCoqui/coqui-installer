@@ -23,7 +23,7 @@ PHP_MINOR=4
 
 # ─── Mode flags (set via CLI arguments) ──────────────────────────────────────
 
-KEEP_WORKSPACE=false   # true when --keep-workspace is passed
+REMOVE_WORKSPACE=false # true when --remove-workspace is passed
 FORCE_MODE=false       # true when --force is passed (skip prompts)
 ALL_MODE=false         # true when --all is passed (also remove PHP/Composer)
 QUIET_MODE=false       # true when --quiet is passed (minimal output)
@@ -33,8 +33,8 @@ QUIET_MODE=false       # true when --quiet is passed (minimal output)
 parse_args() {
     while [ $# -gt 0 ]; do
         case "$1" in
-            --keep-workspace)
-                KEEP_WORKSPACE=true; shift ;;
+            --remove-workspace)
+                REMOVE_WORKSPACE=true; shift ;;
             --force)
                 FORCE_MODE=true; shift ;;
             --all)
@@ -57,24 +57,23 @@ show_usage() {
     echo "Removes Coqui and associated files from your system."
     echo ""
     echo "Flags:"
-    echo "  --keep-workspace       Preserve the workspace directory (~/.coqui/.workspace)"
+    echo "  --remove-workspace     Delete the workspace directory (~/.coqui/.workspace)"
     echo "  --force                Skip all confirmation prompts"
     echo "  --all                  Also remove PHP and Composer installed by Coqui"
     echo "  --quiet, -q            Minimal output (milestones and errors only)"
     echo "  --help, -h             Show this help"
     echo ""
-    echo "By default, the uninstaller prompts before deleting the workspace"
-    echo "(default: keep) and does NOT remove PHP or Composer."
+    echo "By default, the uninstaller preserves workspace data and does NOT remove PHP or Composer."
     echo ""
     echo "Environment variables:"
     echo "  COQUI_INSTALL_DIR      Install path (default: \$HOME/.coqui)"
     echo ""
     echo "Examples:"
-    echo "  # Interactive uninstall (prompts for workspace)"
+    echo "  # Interactive uninstall (workspace preserved by default)"
     echo "  ./uninstall.sh"
     echo ""
-    echo "  # Keep workspace data for future reinstall"
-    echo "  ./uninstall.sh --keep-workspace"
+    echo "  # Remove workspace data too"
+    echo "  ./uninstall.sh --remove-workspace"
     echo ""
     echo "  # Remove everything without prompts"
     echo "  ./uninstall.sh --force"
@@ -276,26 +275,14 @@ remove_install_dir() {
     local workspace_dir="${COQUI_INSTALL_DIR}/.workspace"
     local delete_workspace=false
 
-    if [ "$KEEP_WORKSPACE" = true ]; then
-        # Explicit flag: keep workspace
-        status "Workspace will be preserved (--keep-workspace)"
-    elif [ "$FORCE_MODE" = true ]; then
-        # Force mode without --keep-workspace: delete workspace
+    if [ "$REMOVE_WORKSPACE" = true ]; then
+        # Explicit flag: remove workspace
         delete_workspace=true
     elif [ -d "$workspace_dir" ]; then
-        # Interactive: prompt user (default is to keep)
-        echo ""
-        echo "  ${BOLD}Workspace directory:${RESET} ${workspace_dir}"
-        echo "  Contains session data, installed packages, and agent configuration."
-        echo ""
-        if confirm "Delete workspace data?" "no"; then
-            delete_workspace=true
-        else
-            status "Workspace will be preserved"
-        fi
+        status "Workspace will be preserved (use --remove-workspace to delete)"
     fi
 
-    if [ "$delete_workspace" = true ] || [ "$KEEP_WORKSPACE" = false ] && [ "$FORCE_MODE" = true ]; then
+    if [ "$delete_workspace" = true ]; then
         # Delete the entire install directory
         status "Removing ${COQUI_INSTALL_DIR}..."
         rm -rf "$COQUI_INSTALL_DIR"
