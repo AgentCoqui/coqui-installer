@@ -17,7 +17,7 @@ Describe "uninstall.ps1 argument parsing" {
 
     It "-Help output contains usage info" {
         $result = & pwsh -NonInteractive -NoProfile -File $UninstallScript -Help 2>&1
-        $result | Should -Match "Usage|uninstall"
+        ($result -join "`n") | Should -Match "Usage|uninstall"
     }
 }
 
@@ -38,7 +38,7 @@ Describe "uninstall.ps1 not-installed guard" {
         $env:COQUI_INSTALL_DIR = $fakeDir
 
         $result = & pwsh -NonInteractive -NoProfile -File $UninstallScript -Force 2>&1
-        $result | Should -Match "not installed"
+        ($result -join "`n") | Should -Match "not installed"
 
         $env:COQUI_INSTALL_DIR = $null
     }
