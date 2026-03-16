@@ -23,7 +23,8 @@
 
 param(
     [switch]$Dev,
-    [switch]$Quiet
+    [switch]$Quiet,
+    [switch]$Help
 )
 
 $ErrorActionPreference = "Continue"
@@ -49,9 +50,10 @@ $REQUIRED_PHP_MINOR = 4
 # PHP extensions required by Coqui and php-agents
 $REQUIRED_EXTENSIONS = @("curl", "mbstring", "openssl", "pdo_sqlite", "xml", "zip")
 
-# Mode flag
+# Mode flags
 $script:DEV_MODE = $Dev.IsPresent
 $script:QUIET_MODE = $Quiet.IsPresent
+$script:HELP_MODE = $Help.IsPresent
 
 # Resolved at runtime
 $script:LATEST_VERSION = ""
@@ -769,6 +771,26 @@ function Create-SymlinkWrapper {
     Write-Success "Wrapper created: $CoquiBat"
 }
 
+# ─── Usage ───────────────────────────────────────────────────────────────────
+
+function Show-Usage {
+    Write-Host "Usage: .\install.ps1 [flags]"
+    Write-Host ""
+    Write-Host "Downloads and installs Coqui on Windows."
+    Write-Host ""
+    Write-Host "  irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.ps1 | iex"
+    Write-Host ""
+    Write-Host "Flags:"
+    Write-Host "  -Dev                 Clone the git repository instead of downloading a release"
+    Write-Host "  -Quiet               Minimal output (milestones and errors only)"
+    Write-Host "  -Help                Show this help"
+    Write-Host ""
+    Write-Host "Examples:"
+    Write-Host "  .\install.ps1                # Install latest release"
+    Write-Host "  .\install.ps1 -Dev           # Install from git (development)"
+    Write-Host "  .\install.ps1 -Quiet         # Install with minimal output"
+}
+
 # ─── Banner ──────────────────────────────────────────────────────────────────
 
 function Show-Banner {
@@ -825,6 +847,11 @@ function Print-Success {
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 function Main {
+    if ($script:HELP_MODE) {
+        Show-Usage
+        return
+    }
+
     Show-Banner
 
     $OriginalDir = Get-Location
