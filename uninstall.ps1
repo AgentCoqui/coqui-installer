@@ -64,6 +64,7 @@ $script:REMOVE_WORKSPACE = $RemoveWorkspace.IsPresent
 $script:FORCE_MODE = $Force.IsPresent
 $script:ALL_MODE = $All.IsPresent
 $script:QUIET_MODE = $Quiet.IsPresent
+$script:HELP_MODE = $Help.IsPresent
 
 # ─── Output helpers ──────────────────────────────────────────────────────────
 
@@ -468,7 +469,7 @@ function Print-Summary {
 # ─── Main ────────────────────────────────────────────────────────────────────
 
 function Main {
-    if ($Help.IsPresent) {
+    if ($script:HELP_MODE) {
         Show-Usage
         return
     }
