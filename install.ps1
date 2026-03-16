@@ -576,12 +576,8 @@ function Update-Release {
 
         # Back up user data before replacing
         Write-Status "Backing up user data..."
-        $ConfigFile = Join-Path $COQUI_INSTALL_DIR "openclaw.json"
         $WorkspaceDir = Join-Path $COQUI_INSTALL_DIR ".workspace"
 
-        if (Test-Path $ConfigFile) {
-            Copy-Item -Path $ConfigFile -Destination (Join-Path $TempDir "openclaw.json.bak") -Force
-        }
         # Back up workspace directory
         if (Test-Path $WorkspaceDir) {
             Copy-Item -Path $WorkspaceDir -Destination (Join-Path $TempDir ".workspace.bak") -Recurse -Force
@@ -590,10 +586,6 @@ function Update-Release {
         # Extract new release
         Expand-Archive -Path $ArchivePath -DestinationPath $TempDir -Force
 
-        # Remove old files (except user data we already backed up)
-        Get-ChildItem -Path $COQUI_INSTALL_DIR -Exclude ".workspace", "openclaw.json" |
-            Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-
         # Install new release
         $ExtractedDir = Join-Path $TempDir "coqui"
         if (Test-Path $ExtractedDir) {
@@ -601,7 +593,6 @@ function Update-Release {
         }
 
         # Restore user data (overwrite any defaults from new release)
-        $ConfigBackup = Join-Path $TempDir "openclaw.json.bak"
         $WorkspaceBackup = Join-Path $TempDir ".workspace.bak"
 
         if (Test-Path $ConfigBackup) {
@@ -761,90 +752,6 @@ function Run-ComposerInstall {
     Write-Success "Dependencies installed"
 }
 
-# ─── Configuration ───────────────────────────────────────────────────────────
-
-function Setup-Config {
-    $ConfigFile = Join-Path $COQUI_INSTALL_DIR "openclaw.json"
-
-    if (Test-Path $ConfigFile) {
-        Write-Success "Configuration file exists (preserved)"
-        return
-    }
-
-    Write-Status "Creating default configuration..."
-
-    $ConfigJson = @"
-{
-    "agents": {
-        "defaults": {
-            "workspace": "~/.coqui/.workspace",
-            "models": {
-                "ollama/qwen3:latest": { "alias": "qwen" },
-                "ollama/qwen3-coder:latest": { "alias": "coder" },
-                "ollama/glm-4.7-flash:latest": { "alias": "glm" },
-                "ollama/llama3.2:latest": { "alias": "llama" }
-            },
-            "model": {
-                "primary": "ollama/glm-4.7-flash:latest",
-                "fallbacks": ["ollama/qwen3-coder:latest"]
-            },
-            "roles": {
-                "orchestrator": "ollama/glm-4.7-flash:latest",
-                "coder": "ollama/qwen3-coder:latest",
-                "reviewer": "ollama/qwen3:latest"
-            }
-        }
-    },
-    "models": {
-        "providers": {
-            "ollama": {
-                "baseUrl": "http://localhost:11434/v1",
-                "apiKey": "ollama-local",
-                "api": "openai-completions",
-                "models": [
-                    {
-                        "id": "qwen3:latest",
-                        "name": "Qwen 3",
-                        "reasoning": false,
-                        "input": ["text"],
-                        "contextWindow": 128000,
-                        "maxTokens": 8192
-                    },
-                    {
-                        "id": "qwen3-coder:latest",
-                        "name": "Qwen 3 Coder",
-                        "reasoning": false,
-                        "input": ["text"],
-                        "contextWindow": 128000,
-                        "maxTokens": 8192
-                    },
-                    {
-                        "id": "glm-4.7-flash:latest",
-                        "name": "GLM 4.7 Flash",
-                        "reasoning": false,
-                        "input": ["text"],
-                        "contextWindow": 128000,
-                        "maxTokens": 8192
-                    },
-                    {
-                        "id": "llama3.2:latest",
-                        "name": "Llama 3.2",
-                        "reasoning": false,
-                        "input": ["text"],
-                        "contextWindow": 128000,
-                        "maxTokens": 4096
-                    }
-                ]
-            }
-        }
-    }
-}
-"@
-
-    Set-Content -Path $ConfigFile -Value $ConfigJson
-    Write-Success "Default configuration created (Ollama local provider)"
-}
-
 # ─── Wrapper ─────────────────────────────────────────────────────────────────
 
 function Create-SymlinkWrapper {
@@ -908,19 +815,10 @@ function Print-Success {
     Write-Host ""
     Write-Host "    coqui"
     Write-Host ""
-    Write-Host "  Configuration:"
-    Write-Host ""
-    Write-Host "    $COQUI_INSTALL_DIR\openclaw.json"
-    Write-Host ""
     Write-Host "  Add cloud providers (optional):"
     Write-Host ""
     Write-Host "    `$env:OPENAI_API_KEY=`"sk-...`""
     Write-Host "    `$env:ANTHROPIC_API_KEY=`"sk-ant-...`""
-    Write-Host ""
-    Write-Host "  Prerequisites:"
-    Write-Host ""
-    Write-Host "    Make sure Ollama is running:  ollama serve"
-    Write-Host "    Pull a model:                 ollama pull glm-4.7-flash"
     Write-Host ""
     Write-Host "  Docs:  https://github.com/AgentCoqui/coqui"
     Write-Host ""
@@ -945,7 +843,6 @@ function Main {
                 Check-Composer
 
                 Update-Dev
-                Setup-Config
                 Create-SymlinkWrapper
 
                 Print-Success "Update"
@@ -965,7 +862,6 @@ function Main {
                 Check-Composer
 
                 Install-Dev
-                Setup-Config
                 Create-SymlinkWrapper
 
                 Print-Success "Installation"
@@ -990,7 +886,6 @@ function Main {
                 Check-Extensions
 
                 Update-Release
-                Setup-Config
                 Create-SymlinkWrapper
 
                 Print-Success "Update"
@@ -999,7 +894,6 @@ function Main {
                 Check-Extensions
 
                 Install-Release
-                Setup-Config
                 Create-SymlinkWrapper
 
                 Print-Success "Installation"

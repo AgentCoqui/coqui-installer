@@ -40,7 +40,6 @@ Get-Content install.ps1 | more
 - Installs PHP 8.4+ and required extensions automatically if missing
 - Downloads the latest Coqui release from GitHub (pre-built with dependencies)
 - Verifies the download with SHA-256 checksums
-- Creates a default configuration with Ollama as the local provider
 - Adds `coqui` command to your PATH
 
 ## Update
@@ -87,24 +86,24 @@ Install individual components with flags:
 ./install.sh --install-coqui --dev
 ```
 
-| Flag | Description |
-| ---- | ----------- |
-| `--install-php` | Install/check PHP 8.4+ and required extensions |
-| `--install-composer` | Install/check Composer |
-| `--install-coqui` | Install/update Coqui, create config and symlink |
-| `--dev` | Use git clone instead of release download |
-| `--non-interactive` | Skip all confirmation prompts (assume yes) |
-| `--help`, `-h` | Show usage |
+| Flag                 | Description                                     |
+| -------------------- | ----------------------------------------------- |
+| `--install-php`      | Install/check PHP 8.4+ and required extensions  |
+| `--install-composer` | Install/check Composer                          |
+| `--install-coqui`    | Install/update Coqui, create config and symlink |
+| `--dev`              | Use git clone instead of release download       |
+| `--non-interactive`  | Skip all confirmation prompts (assume yes)      |
+| `--help`, `-h`       | Show usage                                      |
 
 ## Configuration
 
 Override defaults with environment variables:
 
-| Variable | Default | Description |
-| -------- | ------- | ----------- |
-| `COQUI_INSTALL_DIR` | `~/.coqui` | Where Coqui is installed |
-| `COQUI_REPO` | GitHub repo URL | Git repository to clone from (dev mode only) |
-| `COQUI_VERSION` | latest | Release version or git branch/tag to install |
+| Variable            | Default         | Description                                  |
+| ------------------- | --------------- | -------------------------------------------- |
+| `COQUI_INSTALL_DIR` | `~/.coqui`      | Where Coqui is installed                     |
+| `COQUI_REPO`        | GitHub repo URL | Git repository to clone from (dev mode only) |
+| `COQUI_VERSION`     | latest          | Release version or git branch/tag to install |
 
 Example:
 
@@ -121,7 +120,7 @@ COQUI_INSTALL_DIR=/opt/coqui bash install.sh
 - Linux, macOS, or Windows 10/11
 - PHP 8.4 or later
 - Extensions: `curl`, `mbstring`, `pdo_sqlite`, `xml`, `zip`
-- [Ollama](https://ollama.ai) (recommended for local inference)
+- [Ollama](https://ollama.com) (recommended for local embeddings)
 
 Additional requirements for `--dev` mode only:
 - Composer 2.x
@@ -145,13 +144,13 @@ irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/uninstall.
 
 ### Uninstall flags
 
-| Flag (bash) | Flag (PowerShell) | Description |
-| ----------- | ----------------- | ----------- |
-| `--keep-workspace` | `-KeepWorkspace` | Preserve the workspace directory (`~/.coqui/.workspace`) |
-| `--force` | `-Force` | Skip all confirmation prompts (removes Coqui + workspace) |
-| `--all` | `-All` | Also remove PHP and Composer installed by Coqui |
-| `--quiet`, `-q` | `-Quiet` | Minimal output |
-| `--help`, `-h` | `-Help` | Show usage |
+| Flag (bash)        | Flag (PowerShell) | Description                                               |
+| ------------------ | ----------------- | --------------------------------------------------------- |
+| `--keep-workspace` | `-KeepWorkspace`  | Preserve the workspace directory (`~/.coqui/.workspace`)  |
+| `--force`          | `-Force`          | Skip all confirmation prompts (removes Coqui + workspace) |
+| `--all`            | `-All`            | Also remove PHP and Composer installed by Coqui           |
+| `--quiet`, `-q`    | `-Quiet`          | Minimal output                                            |
+| `--help`, `-h`     | `-Help`           | Show usage                                                |
 
 ### Uninstall examples
 
@@ -179,14 +178,14 @@ irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/uninstall.
 
 ### What gets removed
 
-| Component | Default | `--force` | `--all` |
-| --------- | ------- | --------- | ------- |
-| Coqui install directory | Yes | Yes | Yes |
-| Symlink / wrapper | Yes | Yes | Yes |
-| PATH entry (Windows) | Yes | Yes | Yes |
-| Workspace data | Prompt (default: keep) | Yes | Yes |
-| PHP | No | No | Prompt (default: no) |
-| Composer | No | No | Prompt (default: no) |
+| Component               | Default                | `--force` | `--all`              |
+| ----------------------- | ---------------------- | --------- | -------------------- |
+| Coqui install directory | Yes                    | Yes       | Yes                  |
+| Symlink / wrapper       | Yes                    | Yes       | Yes                  |
+| PATH entry (Windows)    | Yes                    | Yes       | Yes                  |
+| Workspace data          | Prompt (default: keep) | Yes       | Yes                  |
+| PHP                     | No                     | No        | Prompt (default: no) |
+| Composer                | No                     | No        | Prompt (default: no) |
 
 With `--force --all`, everything is removed without prompts.
 
