@@ -20,11 +20,35 @@
 #                                 would force misleading names (e.g. renaming
 #                                 Check-Php → Test-Php implies it only returns
 #                                 a boolean, not that it installs PHP).
+#
+#   PSUseSingularNouns          — Same rationale as PSUseApprovedVerbs.
+#                                 Check-Extensions is an internal helper that
+#                                 checks multiple PHP extensions as a batch;
+#                                 renaming it to Check-Extension would be
+#                                 misleading about what the function does.
+#
+#   PSAvoidUsingEmptyCatchBlock — All empty catch blocks in these scripts are
+#                                 intentional "best-effort" probes where the
+#                                 failure is handled by testing the output
+#                                 variable on the next line (e.g. querying
+#                                 php -r, git stash, git rev-parse). The
+#                                 alternative — using -ErrorAction
+#                                 SilentlyContinue — does not suppress
+#                                 terminating errors thrown by pwsh itself.
+#
+#   PSUseShouldProcessForStateChangingFunctions
+#                               — ShouldProcess (-WhatIf / -Confirm) is
+#                                 intended for module cmdlets, not for
+#                                 internal functions inside a standalone
+#                                 installer script that users run directly.
 
 @{
     ExcludeRules = @(
         'PSAvoidUsingWriteHost',
         'PSUseBOMForUnicodeEncodedFile',
-        'PSUseApprovedVerbs'
+        'PSUseApprovedVerbs',
+        'PSUseSingularNouns',
+        'PSAvoidUsingEmptyCatchBlock',
+        'PSUseShouldProcessForStateChangingFunctions'
     )
 }
