@@ -460,6 +460,38 @@ check_extensions() {
     fi
 }
 
+# ─── Performance checks ─────────────────────────────────────────────────────
+
+check_opcache() {
+    status "Checking OPcache / JIT..."
+
+    local opcache_loaded
+    opcache_loaded="$(php -r 'echo extension_loaded("Zend OPcache") ? "1" : "0";' 2>/dev/null)"
+
+    if [ "$opcache_loaded" != "1" ]; then
+        warn "OPcache extension not loaded — install php-opcache for faster performance"
+        return
+    fi
+
+    local opcache_enabled
+    opcache_enabled="$(php -r 'echo ini_get("opcache.enable_cli") ?: "0";' 2>/dev/null)"
+
+    if [ "$opcache_enabled" != "1" ]; then
+        warn "OPcache CLI not enabled — set opcache.enable_cli=1 in php.ini"
+    else
+        success "OPcache CLI enabled"
+    fi
+
+    local jit_buffer
+    jit_buffer="$(php -r 'echo ini_get("opcache.jit_buffer_size") ?: "0";' 2>/dev/null)"
+
+    if [ "$jit_buffer" = "0" ] || [ -z "$jit_buffer" ]; then
+        warn "JIT disabled — set opcache.jit=1255 and opcache.jit_buffer_size=128M for improved loop performance"
+    else
+        success "JIT enabled (buffer: ${jit_buffer})"
+    fi
+}
+
 # ─── Git check ───────────────────────────────────────────────────────────────
 
 check_git() {
@@ -985,6 +1017,7 @@ main() {
         if [ "$INSTALL_PHP" = true ]; then
             check_php
             check_extensions
+            check_opcache
         fi
 
         if [ "$INSTALL_COMPOSER" = true ]; then
@@ -1048,6 +1081,7 @@ main() {
 
             check_php
             check_extensions
+            check_opcache
             check_composer
 
             update_dev
@@ -1066,6 +1100,7 @@ main() {
 
             check_php
             check_extensions
+            check_opcache
             check_git
             check_composer
 
@@ -1092,6 +1127,7 @@ main() {
 
             check_php
             check_extensions
+            check_opcache
 
             update_release
             create_symlink
@@ -1100,6 +1136,7 @@ main() {
         else
             check_php
             check_extensions
+            check_opcache
 
             install_release
             create_symlink
