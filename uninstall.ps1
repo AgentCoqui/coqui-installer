@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Coqui Uninstaller for Windows
     https://github.com/AgentCoqui/coqui
@@ -338,8 +338,15 @@ function Remove-Php {
     Write-Status "Removing PHP..."
 
     if (Test-Command "winget") {
+        # Try the NTS package first (preferred install path), then the TS package
+        $NtsResult = 0
+        $TsResult = 0
+        & winget uninstall --id "PHP.PHP.NTS.${PHP_MAJOR}.${PHP_MINOR}" --silent 2>&1 | Out-Null
+        $NtsResult = $LASTEXITCODE
         & winget uninstall --id "PHP.PHP.${PHP_MAJOR}.${PHP_MINOR}" --silent 2>&1 | Out-Null
-        if ($LASTEXITCODE -eq 0) {
+        $TsResult = $LASTEXITCODE
+
+        if ($NtsResult -eq 0 -or $TsResult -eq 0) {
             Write-Success "PHP removed via winget"
         } else {
             Write-Warn "winget could not remove PHP. You may need to remove it manually."
@@ -427,9 +434,9 @@ function Print-Summary {
     }
 
     Write-Host ""
-    Write-Host "  ──────────────────────────────────────────"
+    Write-Host "  ------------------------------------------"
     Write-Host -Object "  Uninstall complete!" -ForegroundColor Green
-    Write-Host "  ──────────────────────────────────────────"
+    Write-Host "  ------------------------------------------"
 
     $WorkspaceDir = Join-Path $COQUI_INSTALL_DIR ".workspace"
     if (Test-Path $WorkspaceDir) {
