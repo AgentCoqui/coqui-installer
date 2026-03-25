@@ -31,7 +31,7 @@ REQUIRED_PHP_MAJOR=8
 REQUIRED_PHP_MINOR=4
 
 # PHP extensions required by Coqui and php-agents
-REQUIRED_EXTENSIONS="curl mbstring openssl pdo_sqlite xml zip"
+REQUIRED_EXTENSIONS="curl mbstring openssl pdo_sqlite readline xml zip"
 
 # ─── Mode flags (set via CLI arguments) ──────────────────────────────────────
 
