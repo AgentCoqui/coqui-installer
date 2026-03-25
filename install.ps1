@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Coqui Installer for Windows
     https://github.com/AgentCoqui/coqui
@@ -138,10 +138,26 @@ function Install-Php {
         Write-Fatal "PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ is required."
     }
 
-    Write-Status "Installing PHP via winget..."
-    & winget install --id PHP.PHP.${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR} --accept-source-agreements --accept-package-agreements --silent 2>&1 | Out-Null
+    # Prefer the Non-Thread-Safe (NTS) build for CLI use — it is lighter and
+    # the TS winget manifest has had broken download URLs in the past.
+    # Fall back to the Thread-Safe (TS) package if NTS is unavailable.
+    Write-Status "Installing PHP via winget (NTS)..."
+    & winget install --id PHP.PHP.NTS.${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR} --accept-source-agreements --accept-package-agreements --silent 2>&1 | Out-Null
+    $NtsExitCode = $LASTEXITCODE
 
-    if ($LASTEXITCODE -ne 0) {
+    if ($NtsExitCode -ne 0) {
+        Write-Status "NTS package unavailable, trying Thread-Safe build..."
+        & winget install --id PHP.PHP.${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR} --accept-source-agreements --accept-package-agreements --silent 2>&1 | Out-Null
+    }
+
+    if ($NtsExitCode -ne 0 -and $LASTEXITCODE -ne 0) {
+        # winget returns non-zero for "already installed" — check if PHP is
+        # already present on PATH before treating this as a real failure.
+        Refresh-Path
+        if (Test-Command "php") {
+            Write-Success "PHP already installed"
+            return
+        }
         Write-Host ""
         Write-Host "  winget could not install PHP automatically."
         Write-Host "  Please install PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ manually:"
@@ -158,13 +174,21 @@ function Install-Php {
         Write-Fatal "PHP not found in PATH after install."
     }
 
-    Write-Success "PHP installed via winget"
+    if ($NtsExitCode -eq 0) {
+        Write-Success "PHP installed via winget (NTS)"
+    } else {
+        Write-Success "PHP installed via winget"
+    }
 }
 
 # ─── PHP checks ──────────────────────────────────────────────────────────────
 
 function Check-Php {
     Write-Status "Checking PHP..."
+
+    # Refresh PATH first — PHP may have been installed by winget in a previous
+    # run but the current shell session hasn't picked up the new PATH entry yet.
+    Refresh-Path
 
     if (-not (Test-Command "php")) {
         Write-Warn "PHP is not installed."
@@ -379,7 +403,7 @@ function Install-Composer {
 
     $TempScript = Join-Path $env:TEMP "composer-setup.php"
     try {
-        Invoke-WebRequest -Uri "https://getcomposer.org/installer" -OutFile $TempScript -ErrorAction Stop
+        Invoke-WebRequest -Uri "https://getcomposer.org/installer" -UseBasicParsing -OutFile $TempScript -ErrorAction Stop
     } catch {
         Write-Fatal "Failed to download Composer installer."
     }
@@ -475,14 +499,20 @@ function Test-Checksum {
     Write-Status "Verifying checksum..."
 
     try {
-        $ExpectedContent = (Invoke-WebRequest -Uri $ChecksumUrl -ErrorAction Stop).Content
+        $RawContent = (Invoke-WebRequest -Uri $ChecksumUrl -UseBasicParsing -ErrorAction Stop).Content
+        # .Content may be byte[] (binary content-type) or a string — handle both
+        if ($RawContent -is [byte[]]) {
+            $ExpectedContent = [System.Text.Encoding]::ASCII.GetString($RawContent)
+        } else {
+            $ExpectedContent = $RawContent -as [string]
+        }
     } catch {
         Write-Warn "Could not download checksum file. Skipping verification."
         return
     }
 
     # The .sha256 file format is: "hash  filename"
-    $ExpectedHash = ($ExpectedContent -split '\s')[0].Trim()
+    $ExpectedHash = ($ExpectedContent -split '\s')[0].Trim().ToLower()
     $ActualHash = (Get-FileHash -Path $FilePath -Algorithm SHA256).Hash.ToLower()
 
     if ($ExpectedHash -ne $ActualHash) {
@@ -509,7 +539,7 @@ function Install-Release {
         $ArchivePath = Join-Path $TempDir $ArchiveName
 
         try {
-            Invoke-WebRequest -Uri $DownloadUrl -OutFile $ArchivePath -ErrorAction Stop
+            Invoke-WebRequest -Uri $DownloadUrl -UseBasicParsing -OutFile $ArchivePath -ErrorAction Stop
         } catch {
             Write-Fatal "Failed to download release v$($script:LATEST_VERSION). URL: $DownloadUrl"
         }
@@ -531,7 +561,7 @@ function Install-Release {
         if (Test-Path $ExtractedDir) {
             Copy-Item -Path "$ExtractedDir\*" -Destination $COQUI_INSTALL_DIR -Recurse -Force
         } else {
-            Write-Fatal "Unexpected archive structure — 'coqui' directory not found."
+            Write-Fatal "Unexpected archive structure - 'coqui' directory not found."
         }
 
         # Write version marker
@@ -569,7 +599,7 @@ function Update-Release {
         $ArchivePath = Join-Path $TempDir $ArchiveName
 
         try {
-            Invoke-WebRequest -Uri $DownloadUrl -OutFile $ArchivePath -ErrorAction Stop
+            Invoke-WebRequest -Uri $DownloadUrl -UseBasicParsing -OutFile $ArchivePath -ErrorAction Stop
         } catch {
             Write-Fatal "Failed to download release v$($script:LATEST_VERSION)."
         }
@@ -597,9 +627,6 @@ function Update-Release {
         # Restore user data (overwrite any defaults from new release)
         $WorkspaceBackup = Join-Path $TempDir ".workspace.bak"
 
-        if (Test-Path $ConfigBackup) {
-            Copy-Item -Path $ConfigBackup -Destination $ConfigFile -Force
-        }
         # Restore workspace if it existed
         if (Test-Path $WorkspaceBackup) {
             $WorkspaceDir = Join-Path $COQUI_INSTALL_DIR ".workspace"
@@ -716,7 +743,7 @@ function Update-Dev {
         & git stash pop --quiet 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) {
             Write-Warn "Could not restore local changes from stash (likely a merge conflict)."
-            Write-Warn "Dropping stash — composer install will regenerate lock file."
+            Write-Warn "Dropping stash - composer install will regenerate lock file."
             & git stash drop --quiet 2>&1 | Out-Null
         }
     }
@@ -732,7 +759,7 @@ function Run-ComposerInstall {
     # Remove stale lock file if it conflicts with the current composer.json
     $null = & composer validate --no-check-all --no-check-publish 2>&1
     if ($LASTEXITCODE -ne 0) {
-        Write-Warn "composer.lock is out of sync — regenerating..."
+        Write-Warn "composer.lock is out of sync - regenerating..."
         $LockFile = Join-Path $COQUI_INSTALL_DIR "composer.lock"
         if (Test-Path $LockFile) {
             Remove-Item -Force $LockFile
@@ -827,9 +854,9 @@ function Print-Success {
     }
 
     Write-Host ""
-    Write-Host "  ──────────────────────────────────────────"
+    Write-Host "  ------------------------------------------"
     Write-Host -Object "  ${InstallType} complete!${VersionInfo}" -ForegroundColor Green
-    Write-Host "  ──────────────────────────────────────────"
+    Write-Host "  ------------------------------------------"
     Write-Host ""
     Write-Host "  Get started:"
     Write-Host ""
