@@ -6,19 +6,23 @@ One liner for [Coqui](https://github.com/AgentCoqui/coqui) — a terminal AI age
 
 The installer downloads the latest GitHub release by default. No Git or Composer required.
 
-### Linux / macOS / WSL2
+> Platform note: Linux, macOS, and WSL2 are the supported install paths. On Windows, use the PowerShell WSL2 bootstrap.
+
+### Bash Dev Mode
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.sh | bash
 ```
 
-### Windows (PowerShell)
+### Windows Bootstrap Dev Mode
+
+The Windows bootstrap checks for WSL2, offers to install Ubuntu when needed, and then runs the standard Coqui installer inside WSL.
 
 ```powershell
 irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.ps1 | iex
 ```
 
-### Inspect before running (Linux / macOS)
+### Inspect before running (Linux / macOS / WSL2)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.sh -o install.sh
@@ -26,7 +30,7 @@ less install.sh
 bash install.sh
 ```
 
-### Inspect before running (Windows)
+### Inspect before running (Windows bootstrap)
 
 ```powershell
 Invoke-WebRequest -Uri https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.ps1 -OutFile install.ps1
@@ -37,10 +41,16 @@ Get-Content install.ps1 | more
 ## What It Does
 
 - Detects your OS and package manager (`apt`, `brew`, `dnf`, `yum`, `pacman`, `apk`, `nix`, `winget`)
-- Installs PHP 8.4+ and required extensions automatically if missing
+- Installs PHP 8.4+ plus the default Coqui extension set automatically when package-manager support is available
 - Downloads the latest Coqui release from GitHub (pre-built with dependencies)
 - Verifies the download with SHA-256 checksums
 - Adds `coqui` command to your PATH
+
+On Windows, the PowerShell bootstrap also checks for WSL2 readiness and then delegates to the bash installer inside your WSL distro.
+
+## After Install
+
+Coqui auto-discovers Composer toolkits and toolkit-provided REPL commands on boot. Install packages with `/space install <package>` or with Composer in your workspace, then restart Coqui to activate newly discovered tools and slash commands.
 
 ## Update
 
@@ -50,17 +60,21 @@ Re-run the install command. The installer detects existing installations and upd
 curl -fsSL https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.sh | bash
 ```
 
+```powershell
+irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.ps1 | iex
+```
+
 ## Development Mode
 
-Use `--dev` (Linux/macOS) or `-Dev` (Windows) to clone the git repository instead of downloading a release. This requires Git and Composer.
+Use `--dev` (bash) or `-Dev` (Windows bootstrap) to clone the git repository instead of downloading a release. This requires Git and Composer inside the target environment.
 
-### Linux / macOS
+### Linux / macOS / WSL2
 
 ```bash
 ./install.sh --dev
 ```
 
-### Windows
+### Windows (WSL2 Bootstrap)
 
 ```powershell
 .\install.ps1 -Dev
@@ -68,7 +82,7 @@ Use `--dev` (Linux/macOS) or `-Dev` (Windows) to clone the git repository instea
 
 Dev mode uses `git clone` and `composer install`, which is useful for contributors or anyone who wants to modify Coqui's source.
 
-## Selective Install (Linux / macOS)
+## Selective Install (Linux / macOS / WSL2)
 
 Install individual components with flags:
 
@@ -117,12 +131,16 @@ COQUI_INSTALL_DIR=/opt/coqui bash install.sh
 
 ## Requirements
 
-- Linux, macOS, or Windows 10/11
+- Linux or macOS
+- Windows 10/11 via WSL2
 - PHP 8.4 or later
-- Extensions: `curl`, `mbstring`, `pdo_sqlite`, `xml`, `zip`
+- Core extensions: `dom`, `mbstring`, `pdo_sqlite`, `xml`
+- Recommended extensions: `curl`, `readline`, `zip`
+- Optional extensions: `gd` for bundled image previews
 - [Ollama](https://ollama.com) (recommended for local embeddings)
 
 Additional requirements for `--dev` mode only:
+
 - Composer 2.x
 - Git
 
@@ -130,13 +148,13 @@ Additional requirements for `--dev` mode only:
 
 The uninstaller removes Coqui, its symlinks/wrappers, and PATH entries. By default it preserves workspace data and does **not** remove PHP or Composer.
 
-### Linux / macOS / WSL2
+### Linux / macOS / WSL2 Uninstall
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/uninstall.sh | bash
 ```
 
-### Windows (PowerShell)
+### Windows (WSL2 Bootstrap) Uninstall
 
 ```powershell
 irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/uninstall.ps1 | iex
@@ -148,7 +166,7 @@ irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/uninstall.
 | -------------------- | ------------------ | ------------------------------------------------------ |
 | `--remove-workspace` | `-RemoveWorkspace` | Delete the workspace directory (`~/.coqui/.workspace`) |
 | `--force`            | `-Force`           | Skip all confirmation prompts                          |
-| `--all`              | `-All`             | Also remove PHP and Composer installed by Coqui        |
+| `--all`              | Not supported      | Also remove PHP and Composer installed by Coqui        |
 | `--quiet`, `-q`      | `-Quiet`           | Minimal output                                         |
 | `--help`, `-h`       | `-Help`            | Show usage                                             |
 
@@ -175,22 +193,9 @@ irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/uninstall.
 # Remove workspace data too
 .\uninstall.ps1 -RemoveWorkspace
 
-# Remove everything including PHP and Composer
-.\uninstall.ps1 -Force -All
+# Skip confirmation prompts inside WSL
+.\uninstall.ps1 -Force
 ```
-
-### What gets removed
-
-| Component               | Default | `--force` | `--all`              | `--remove-workspace` |
-| ----------------------- | ------- | --------- | -------------------- | -------------------- |
-| Coqui install directory | Yes     | Yes       | Yes                  | Yes                  |
-| Symlink / wrapper       | Yes     | Yes       | Yes                  | Yes                  |
-| PATH entry (Windows)    | Yes     | Yes       | Yes                  | Yes                  |
-| Workspace data          | Kept    | Kept      | Kept                 | Yes                  |
-| PHP                     | No      | No        | Prompt (default: no) | No                   |
-| Composer                | No      | No        | Prompt (default: no) | No                   |
-
-With `--force --all`, PHP and Composer are removed without prompts. Add `--remove-workspace` to also delete workspace data.
 
 ## License
 

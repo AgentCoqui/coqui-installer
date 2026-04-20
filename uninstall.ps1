@@ -1,72 +1,42 @@
-﻿<#
+<#
 .SYNOPSIS
-    Coqui Uninstaller for Windows
+    Coqui WSL2 Bootstrap Uninstaller for Windows
     https://github.com/AgentCoqui/coqui
 
 .DESCRIPTION
-    Removes Coqui and associated files from a Windows system.
-    Optionally removes PHP and Composer with the -All flag.
+    Removes a Coqui installation that was installed in the supported WSL2-based
+    Windows workflow by running uninstall.sh inside WSL.
 
 .PARAMETER RemoveWorkspace
-    Delete the workspace directory during uninstallation.
+    Delete the WSL workspace directory during uninstallation.
 
 .PARAMETER Force
-    Skip all confirmation prompts.
+    Skip all confirmation prompts inside the WSL uninstaller.
 
-.PARAMETER All
-    Also remove PHP and Composer installed by Coqui.
-
-.PARAMETER Quiet
-    Minimal output (milestones and errors only).
-
-.PARAMETER Help
-    Show usage instructions.
+.PARAMETER Distro
+    WSL distro to use. Defaults to Ubuntu.
 
 .EXAMPLE
-    # Interactive uninstall
-    .\uninstall.ps1
-
-.EXAMPLE
-    # Remove workspace data
-    .\uninstall.ps1 -RemoveWorkspace
-
-.EXAMPLE
-    # Remove everything without prompts
-    .\uninstall.ps1 -Force
-
-.EXAMPLE
-    # Remove everything including PHP and Composer
-    .\uninstall.ps1 -Force -All
+    irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/uninstall.ps1 | iex
 #>
 
 param(
     [switch]$RemoveWorkspace,
     [switch]$Force,
-    [switch]$All,
     [switch]$Quiet,
-    [switch]$Help
+    [switch]$Help,
+    [string]$Distro = "Ubuntu"
 )
 
 $ErrorActionPreference = "Continue"
 $ProgressPreference = "SilentlyContinue"
 $script:HadError = $false
-
-# ─── Configuration (override via environment variables) ──────────────────────
-
-$COQUI_INSTALL_DIR = if ($env:COQUI_INSTALL_DIR) { $env:COQUI_INSTALL_DIR } else { Join-Path $env:USERPROFILE ".coqui" }
-
-# PHP version that was installed by the Coqui installer
-$PHP_MAJOR = 8
-$PHP_MINOR = 4
-
-# Mode flags
+$script:TARGET_DISTRO = $Distro
 $script:REMOVE_WORKSPACE = $RemoveWorkspace.IsPresent
 $script:FORCE_MODE = $Force.IsPresent
-$script:ALL_MODE = $All.IsPresent
 $script:QUIET_MODE = $Quiet.IsPresent
 $script:HELP_MODE = $Help.IsPresent
-
-# ─── Output helpers ──────────────────────────────────────────────────────────
+$script:UNINSTALL_SCRIPT_URL = if ($env:COQUI_UNINSTALL_SH_URL) { $env:COQUI_UNINSTALL_SH_URL } else { "https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/uninstall.sh" }
 
 function Write-Status {
     param([string]$Message)
@@ -80,16 +50,6 @@ function Write-Success {
     Write-Host -Object "  $([char]0x2713) $Message" -ForegroundColor Green
 }
 
-function Write-Milestone {
-    param([string]$Message)
-    Write-Host -Object "  $([char]0x25B8) $Message" -ForegroundColor Cyan
-}
-
-function Write-Warn {
-    param([string]$Message)
-    Write-Host -Object "  ! $Message" -ForegroundColor Yellow
-}
-
 function Write-Err {
     param([string]$Message)
     Write-Host -Object "  $([char]0x2717) $Message" -ForegroundColor Red
@@ -99,318 +59,176 @@ function Write-Fatal {
     param([string]$Message)
     Write-Err $Message
     $script:HadError = $true
-    throw "CoquiUninstallerError: $Message"
+    throw "CoquiWslBootstrapUninstallError: $Message"
 }
 
-# ─── Utility functions ───────────────────────────────────────────────────────
+function Get-WSLExecutable {
+    if (-not [string]::IsNullOrWhiteSpace($env:COQUI_WSL_EXE)) {
+        return $env:COQUI_WSL_EXE
+    }
 
-function Test-Command {
-    param([string]$CommandName)
-    $null = Get-Command $CommandName -ErrorAction SilentlyContinue
-    return $?
+    foreach ($candidate in @('wsl.exe', 'wsl')) {
+        $command = Get-Command $candidate -ErrorAction SilentlyContinue
+        if ($null -ne $command) {
+            return $command.Source
+        }
+    }
+
+    return $null
 }
 
-function Confirm-Action {
+function Invoke-ExternalCommand {
     param(
-        [string]$Prompt = "Continue?",
-        [string]$Default = "yes"
+        [string]$FilePath,
+        [string[]]$Arguments = @(),
+        [string]$InputText = ""
     )
 
-    # Force mode — assume yes
-    if ($script:FORCE_MODE) { return $true }
+    $output = @()
+    $exitCode = 0
 
-    if ($Default -eq "no") {
-        $suffix = "[y/N]"
-    } else {
-        $suffix = "[Y/n]"
+    try {
+        if ($InputText -ne "") {
+            $output = $InputText | & $FilePath @Arguments 2>&1
+        } else {
+            $output = & $FilePath @Arguments 2>&1
+        }
+        $exitCode = if ($null -eq $LASTEXITCODE) { 0 } else { $LASTEXITCODE }
+    } catch {
+        $output = @($_.ToString())
+        $exitCode = 1
     }
 
-    $reply = Read-Host "  $([char]0x25B8) $Prompt $suffix"
-
-    if ($Default -eq "no") {
-        return ($reply -match '^[yY]')
-    } else {
-        return -not ($reply -match '^[nN]')
+    return [pscustomobject]@{
+        Output = @($output)
+        ExitCode = $exitCode
     }
 }
 
-# ─── Usage ───────────────────────────────────────────────────────────────────
+function Invoke-WSL {
+    param(
+        [string[]]$Arguments = @(),
+        [string]$InputText = ""
+    )
+
+    $wslExe = Get-WSLExecutable
+    if ($null -eq $wslExe) {
+        return [pscustomobject]@{
+            Output = @("wsl.exe was not found on PATH.")
+            ExitCode = 1
+        }
+    }
+
+    return Invoke-ExternalCommand -FilePath $wslExe -Arguments $Arguments -InputText $InputText
+}
+
+function Write-CommandOutput {
+    param([object]$Result)
+
+    foreach ($line in @($Result.Output)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$line)) {
+            Write-Host "    $line"
+        }
+    }
+}
+
+function Get-DistroVersion {
+    param([object]$ListResult)
+
+    if ($ListResult.ExitCode -ne 0) {
+        return $null
+    }
+
+    $pattern = '^\s*\*?\s*' + [regex]::Escape($script:TARGET_DISTRO) + '\s+.+?\s+(?<version>[0-9]+)\s*$'
+    foreach ($line in @($ListResult.Output)) {
+        $text = [string]$line
+        if ($text -match $pattern) {
+            return [int]$Matches['version']
+        }
+    }
+
+    return $null
+}
+
+function Test-BashReady {
+    $result = Invoke-WSL -Arguments @('-d', $script:TARGET_DISTRO, '--', 'bash', '-lc', 'printf coqui-ready')
+    return $result.ExitCode -eq 0 -and ((@($result.Output) -join "`n") -match 'coqui-ready')
+}
+
+function Ensure-WSLReady {
+    $wslExe = Get-WSLExecutable
+    if ($null -eq $wslExe) {
+        Write-Fatal "WSL is not available on this machine. Use install.ps1 to set up the supported Windows path first."
+    }
+
+    $listResult = Invoke-WSL -Arguments @('-l', '-v')
+    $version = Get-DistroVersion -ListResult $listResult
+
+    if ($version -ne 2) {
+        Write-Fatal "WSL2 distro '$($script:TARGET_DISTRO)' is not ready. Use install.ps1 to set up the supported Windows path first."
+    }
+
+    if (-not (Test-BashReady)) {
+        Write-Fatal "WSL2 distro '$($script:TARGET_DISTRO)' exists but still needs first-launch setup. Run 'wsl -d $($script:TARGET_DISTRO)' once, then retry."
+    }
+}
+
+function Get-UninstallScriptContent {
+    if (-not [string]::IsNullOrWhiteSpace($env:COQUI_UNINSTALL_SH_CONTENT)) {
+        return $env:COQUI_UNINSTALL_SH_CONTENT
+    }
+
+    Write-Status "Downloading Coqui uninstaller..."
+    try {
+        return (Invoke-WebRequest -Uri $script:UNINSTALL_SCRIPT_URL -UseBasicParsing -ErrorAction Stop).Content
+    } catch {
+        Write-Fatal "Failed to download uninstall.sh from $($script:UNINSTALL_SCRIPT_URL)."
+    }
+}
+
+function Invoke-UninstallerInWSL {
+    $scriptContent = Get-UninstallScriptContent
+    $scriptArgs = @()
+
+    if ($script:REMOVE_WORKSPACE) {
+        $scriptArgs += '--remove-workspace'
+    }
+
+    if ($script:FORCE_MODE) {
+        $scriptArgs += '--force'
+    }
+
+    if ($script:QUIET_MODE) {
+        $scriptArgs += '--quiet'
+    }
+
+    Write-Status "Running Coqui uninstaller inside WSL2 ($($script:TARGET_DISTRO))..."
+    $arguments = @('-d', $script:TARGET_DISTRO, '--', 'bash', '-s', '--') + $scriptArgs
+    $result = Invoke-WSL -Arguments $arguments -InputText $scriptContent
+
+    if ($result.ExitCode -ne 0) {
+        Write-CommandOutput -Result $result
+        Write-Fatal "The Coqui uninstaller failed inside WSL2."
+    }
+
+    Write-Success "Coqui uninstalled inside WSL2"
+}
 
 function Show-Usage {
     Write-Host "Usage: .\uninstall.ps1 [flags]"
     Write-Host ""
-    Write-Host "Removes Coqui and associated files from your system."
+    Write-Host "Supported Windows uninstall path for a WSL2-based Coqui install."
+    Write-Host ""
+    Write-Host "One-liner:"
+    Write-Host "  irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/uninstall.ps1 | iex"
     Write-Host ""
     Write-Host "Flags:"
-    Write-Host "  -RemoveWorkspace     Delete the workspace directory"
-    Write-Host "  -Force               Skip all confirmation prompts"
-    Write-Host "  -All                 Also remove PHP and Composer installed by Coqui"
-    Write-Host "  -Quiet               Minimal output (milestones and errors only)"
+    Write-Host "  -RemoveWorkspace     Delete the WSL workspace directory"
+    Write-Host "  -Force               Skip confirmation prompts inside WSL"
+    Write-Host "  -Quiet               Minimal output"
     Write-Host "  -Help                Show this help"
-    Write-Host ""
-    Write-Host "By default, the uninstaller preserves workspace data and does NOT remove PHP or Composer."
-    Write-Host ""
-    Write-Host "Examples:"
-    Write-Host "  .\uninstall.ps1                      # Interactive uninstall (workspace preserved)"
-    Write-Host "  .\uninstall.ps1 -RemoveWorkspace     # Remove workspace data too"
-    Write-Host "  .\uninstall.ps1 -Force               # No prompts, preserve workspace"
-    Write-Host "  .\uninstall.ps1 -Force -All          # No prompts, remove everything"
+    Write-Host "  -Distro <name>       WSL distro to use (default: Ubuntu)"
 }
-
-# ─── Installation detection ──────────────────────────────────────────────────
-
-function Test-DevInstalled {
-    $GitPath = Join-Path $COQUI_INSTALL_DIR ".git"
-    return (Test-Path $COQUI_INSTALL_DIR) -and (Test-Path $GitPath)
-}
-
-function Test-ReleaseInstalled {
-    $VersionFile = Join-Path $COQUI_INSTALL_DIR ".coqui-version"
-    return (Test-Path $COQUI_INSTALL_DIR) -and (Test-Path $VersionFile)
-}
-
-function Test-CoquiInstalled {
-    return (Test-DevInstalled) -or (Test-ReleaseInstalled)
-}
-
-function Get-InstalledVersion {
-    $VersionFile = Join-Path $COQUI_INSTALL_DIR ".coqui-version"
-    if (Test-Path $VersionFile) {
-        return (Get-Content -Path $VersionFile -Raw).Trim()
-    }
-    return ""
-}
-
-# ─── Wrapper and PATH removal ────────────────────────────────────────────────
-
-function Remove-CoquiWrapper {
-    $CoquiBinDir = Join-Path $env:LOCALAPPDATA "Programs\Coqui\bin"
-    $CoquiBat = Join-Path $CoquiBinDir "coqui.bat"
-
-    Write-Status "Checking for Coqui wrapper..."
-
-    if (Test-Path $CoquiBat) {
-        Remove-Item -Path $CoquiBat -Force
-        Write-Success "Removed wrapper: $CoquiBat"
-    } else {
-        Write-Status "No wrapper found at $CoquiBat"
-    }
-
-    # If --all, also remove Composer files from the Coqui bin directory
-    if ($script:ALL_MODE) {
-        $ComposerBat = Join-Path $CoquiBinDir "composer.bat"
-        $ComposerPhar = Join-Path $CoquiBinDir "composer.phar"
-
-        if (Test-Path $ComposerBat) {
-            Remove-Item -Path $ComposerBat -Force
-            Write-Success "Removed Composer wrapper: $ComposerBat"
-        }
-        if (Test-Path $ComposerPhar) {
-            Remove-Item -Path $ComposerPhar -Force
-            Write-Success "Removed Composer binary: $ComposerPhar"
-        }
-    }
-
-    # Remove the Coqui bin directory if empty
-    if ((Test-Path $CoquiBinDir) -and ((Get-ChildItem -Path $CoquiBinDir -Force | Measure-Object).Count -eq 0)) {
-        Remove-Item -Path $CoquiBinDir -Force
-        # Also clean up parent directories if empty
-        $CoquiProgramDir = Split-Path $CoquiBinDir
-        if ((Test-Path $CoquiProgramDir) -and ((Get-ChildItem -Path $CoquiProgramDir -Force | Measure-Object).Count -eq 0)) {
-            Remove-Item -Path $CoquiProgramDir -Force
-        }
-        Write-Success "Removed empty directory: $CoquiBinDir"
-    }
-}
-
-function Remove-CoquiFromPath {
-    $CoquiBinDir = Join-Path $env:LOCALAPPDATA "Programs\Coqui\bin"
-
-    Write-Status "Cleaning PATH..."
-
-    $UserPath = [Environment]::GetEnvironmentVariable("PATH", "User")
-    if ([string]::IsNullOrWhiteSpace($UserPath)) {
-        Write-Status "User PATH is empty, nothing to clean"
-        return
-    }
-
-    # Split, filter out Coqui bin dir, rejoin
-    $PathEntries = $UserPath -split ';' | Where-Object {
-        $_.Trim() -ne "" -and $_.Trim() -ne $CoquiBinDir
-    }
-    $NewPath = ($PathEntries -join ';')
-
-    if ($NewPath -ne $UserPath) {
-        [Environment]::SetEnvironmentVariable("PATH", $NewPath, "User")
-        # Also update current session
-        $MachinePath = [Environment]::GetEnvironmentVariable("PATH", "Machine")
-        $env:PATH = "$MachinePath;$NewPath"
-        Write-Success "Removed Coqui bin directory from PATH"
-    } else {
-        Write-Status "Coqui bin directory not found in PATH"
-    }
-}
-
-# ─── Install directory removal ───────────────────────────────────────────────
-
-function Remove-InstallDir {
-    if (-not (Test-Path $COQUI_INSTALL_DIR)) {
-        Write-Status "Install directory not found: $COQUI_INSTALL_DIR"
-        return
-    }
-
-    $VersionInfo = ""
-    if (Test-DevInstalled) {
-        $VersionInfo = " (dev mode)"
-    } elseif (Test-ReleaseInstalled) {
-        $Version = Get-InstalledVersion
-        if ($Version) {
-            $VersionInfo = " v$Version"
-        }
-    }
-
-    Write-Status "Found Coqui installation${VersionInfo} at $COQUI_INSTALL_DIR"
-
-    $WorkspaceDir = Join-Path $COQUI_INSTALL_DIR ".workspace"
-    $DeleteWorkspace = $false
-
-    if ($script:REMOVE_WORKSPACE) {
-        # Explicit flag: remove workspace
-        $DeleteWorkspace = $true
-    } elseif (Test-Path $WorkspaceDir) {
-        Write-Status "Workspace will be preserved (use -RemoveWorkspace to delete)"
-    }
-
-    if ($DeleteWorkspace) {
-        # Delete everything
-        Write-Status "Removing $COQUI_INSTALL_DIR..."
-        Remove-Item -Path $COQUI_INSTALL_DIR -Recurse -Force
-        Write-Success "Removed $COQUI_INSTALL_DIR"
-    } else {
-        # Keep workspace: remove everything except .workspace
-        Write-Status "Removing Coqui files (preserving workspace)..."
-
-        if (Test-Path $WorkspaceDir) {
-            # Move workspace to temp, delete dir, move workspace back
-            $TempDir = Join-Path $env:TEMP "coqui-uninstall-$(Get-Random)"
-            New-Item -ItemType Directory -Force -Path $TempDir | Out-Null
-            Move-Item -Path $WorkspaceDir -Destination (Join-Path $TempDir ".workspace") -Force
-
-            Remove-Item -Path $COQUI_INSTALL_DIR -Recurse -Force
-
-            New-Item -ItemType Directory -Force -Path $COQUI_INSTALL_DIR | Out-Null
-            Move-Item -Path (Join-Path $TempDir ".workspace") -Destination $WorkspaceDir -Force
-            Remove-Item -Path $TempDir -Recurse -Force
-
-            Write-Success "Removed Coqui files (workspace preserved at $WorkspaceDir)"
-        } else {
-            # No workspace directory exists
-            Remove-Item -Path $COQUI_INSTALL_DIR -Recurse -Force
-            Write-Success "Removed $COQUI_INSTALL_DIR"
-        }
-    }
-}
-
-# ─── PHP removal ────────────────────────────────────────────────────────────
-
-function Remove-Php {
-    if (-not (Test-Command "php")) {
-        Write-Status "PHP is not installed"
-        return
-    }
-
-    $PhpVersion = "unknown"
-    try {
-        $PhpVersion = & php -r "echo PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION;" 2>$null
-    } catch {}
-
-    if (-not $script:FORCE_MODE) {
-        Write-Host ""
-        Write-Warn "PHP $PhpVersion is installed on your system."
-        Write-Host "  Other applications may depend on PHP. Removing it could break them."
-        Write-Host ""
-        if (-not (Confirm-Action -Prompt "Remove PHP $PhpVersion?" -Default "no")) {
-            Write-Status "Keeping PHP"
-            return
-        }
-    }
-
-    Write-Status "Removing PHP..."
-
-    if (Test-Command "winget") {
-        # Try the NTS package first (preferred install path), then the TS package
-        $NtsResult = 0
-        $TsResult = 0
-        & winget uninstall --id "PHP.PHP.NTS.${PHP_MAJOR}.${PHP_MINOR}" --silent 2>&1 | Out-Null
-        $NtsResult = $LASTEXITCODE
-        & winget uninstall --id "PHP.PHP.${PHP_MAJOR}.${PHP_MINOR}" --silent 2>&1 | Out-Null
-        $TsResult = $LASTEXITCODE
-
-        if ($NtsResult -eq 0 -or $TsResult -eq 0) {
-            Write-Success "PHP removed via winget"
-        } else {
-            Write-Warn "winget could not remove PHP. You may need to remove it manually."
-            Write-Host "  Settings > Apps > Installed apps > PHP"
-        }
-    } else {
-        Write-Warn "winget is not available. Please remove PHP manually."
-        Write-Host "  Settings > Apps > Installed apps > PHP"
-    }
-}
-
-# ─── Composer removal ────────────────────────────────────────────────────────
-
-function Remove-Composer {
-    if (-not (Test-Command "composer")) {
-        Write-Status "Composer is not installed"
-        return
-    }
-
-    if (-not $script:FORCE_MODE) {
-        Write-Host ""
-        Write-Warn "Composer is installed on your system."
-        Write-Host "  Other PHP projects may depend on Composer."
-        Write-Host ""
-        if (-not (Confirm-Action -Prompt "Remove Composer?" -Default "no")) {
-            Write-Status "Keeping Composer"
-            return
-        }
-    }
-
-    Write-Status "Removing Composer..."
-
-    # The Coqui installer places Composer in the Coqui bin directory.
-    # If it's elsewhere (e.g. installed globally by the user), leave it alone.
-    $CoquiBinDir = Join-Path $env:LOCALAPPDATA "Programs\Coqui\bin"
-    $ComposerBat = Join-Path $CoquiBinDir "composer.bat"
-    $ComposerPhar = Join-Path $CoquiBinDir "composer.phar"
-
-    if (Test-Path $ComposerBat) {
-        Remove-Item -Path $ComposerBat -Force
-    }
-    if (Test-Path $ComposerPhar) {
-        Remove-Item -Path $ComposerPhar -Force
-    }
-    Write-Success "Removed Composer from Coqui bin directory"
-
-    # Remove Composer cache directory
-    $ComposerHome = if ($env:COMPOSER_HOME) { $env:COMPOSER_HOME } else { Join-Path $env:APPDATA "Composer" }
-    if (Test-Path $ComposerHome) {
-        if ($script:FORCE_MODE) {
-            Remove-Item -Path $ComposerHome -Recurse -Force
-            Write-Success "Removed Composer cache: $ComposerHome"
-        } else {
-            if (Confirm-Action -Prompt "Remove Composer cache ($ComposerHome)?" -Default "no") {
-                Remove-Item -Path $ComposerHome -Recurse -Force
-                Write-Success "Removed Composer cache: $ComposerHome"
-            } else {
-                Write-Status "Keeping Composer cache"
-            }
-        }
-    }
-}
-
-# ─── Banner ──────────────────────────────────────────────────────────────────
 
 function Show-Banner {
     if ($script:QUIET_MODE) { return }
@@ -421,59 +239,9 @@ function Show-Banner {
     Write-Host -Object "  ▐███▌▐█▌.▐▌▐█▪▄█·▐█▄█▌▐█▌██▄▪▐█▐█▌.▐▌ ▐█▌·" -ForegroundColor Green
     Write-Host -Object "  ·▀▀▀  ▀█▄▀▪·▀▀█.  ▀▀▀ ▀▀▀·▀▀▀▀  ▀█▄▀▪ ▀▀▀ " -ForegroundColor Green
     Write-Host ""
-    Write-Host "  Coqui Uninstaller (Windows)"
+    Write-Host "  Coqui Uninstaller (Windows via WSL2)"
     Write-Host ""
 }
-
-# ─── Summary ─────────────────────────────────────────────────────────────────
-
-function Print-Summary {
-    if ($script:QUIET_MODE) {
-        Write-Milestone "Uninstall complete"
-        return
-    }
-
-    Write-Host ""
-    Write-Host "  ------------------------------------------"
-    Write-Host -Object "  Uninstall complete!" -ForegroundColor Green
-    Write-Host "  ------------------------------------------"
-
-    $WorkspaceDir = Join-Path $COQUI_INSTALL_DIR ".workspace"
-    if (Test-Path $WorkspaceDir) {
-        Write-Host ""
-        Write-Host "  Workspace preserved:"
-        Write-Host ""
-        Write-Host "    $WorkspaceDir"
-        Write-Host ""
-        Write-Host "  To remove it later:"
-        Write-Host ""
-        Write-Host "    Remove-Item -Recurse -Force $COQUI_INSTALL_DIR"
-    }
-
-    if (-not $script:ALL_MODE) {
-        $HasNote = $false
-        if (Test-Command "php") {
-            if (-not $HasNote) {
-                Write-Host ""
-                Write-Host "  Still installed:"
-                $HasNote = $true
-            }
-            Write-Host "    PHP (re-run with -All to remove)"
-        }
-        if (Test-Command "composer") {
-            if (-not $HasNote) {
-                Write-Host ""
-                Write-Host "  Still installed:"
-                $HasNote = $true
-            }
-            Write-Host "    Composer (re-run with -All to remove)"
-        }
-    }
-
-    Write-Host ""
-}
-
-# ─── Main ────────────────────────────────────────────────────────────────────
 
 function Main {
     if ($script:HELP_MODE) {
@@ -482,50 +250,10 @@ function Main {
     }
 
     Show-Banner
-
-    # Check if Coqui is installed
-    if (-not (Test-Path $COQUI_INSTALL_DIR)) {
-        Write-Warn "Coqui is not installed at $COQUI_INSTALL_DIR"
-        Write-Host ""
-        Write-Host "  If you installed to a custom directory, set COQUI_INSTALL_DIR:"
-        Write-Host "    `$env:COQUI_INSTALL_DIR = 'C:\path\to\coqui'; .\uninstall.ps1"
-        Write-Host ""
-        return
-    }
-
-    # Confirm uninstall (unless -Force)
-    if (-not $script:FORCE_MODE) {
-        Write-Host "  This will remove Coqui from: $COQUI_INSTALL_DIR"
-        Write-Host ""
-        if (-not (Confirm-Action -Prompt "Proceed with uninstall?")) {
-            Write-Host ""
-            Write-Host "  Uninstall cancelled."
-            Write-Host ""
-            return
-        }
-        Write-Host ""
-    }
-
-    # 1. Remove wrapper and clean PATH
-    Remove-CoquiWrapper
-    Remove-CoquiFromPath
-
-    # 2. Remove the install directory (with workspace logic)
-    Remove-InstallDir
-
-    # 3. Optionally remove PHP and Composer (-All only)
-    if ($script:ALL_MODE) {
-        Remove-Php
-        Remove-Composer
-    }
-
-    # 4. Print summary
-    Print-Summary
+    Ensure-WSLReady
+    Invoke-UninstallerInWSL
 }
 
-# Run — the try/catch prevents unhandled throw from Write-Fatal from
-# propagating ugly red text. We do NOT use "exit 1" here because that
-# would kill the user's PowerShell session when run via irm | iex.
 try {
     Main
 } catch {
