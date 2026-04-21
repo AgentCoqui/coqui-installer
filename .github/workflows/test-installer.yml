@@ -7,7 +7,9 @@ on:
       - "install.sh"
       - "uninstall.sh"
       - "install.ps1"
+      - "install-native.ps1"
       - "uninstall.ps1"
+      - "uninstall-native.ps1"
       - "tests/**"
       - ".github/workflows/test-installer.yml"
   pull_request:
@@ -16,7 +18,9 @@ on:
       - "install.sh"
       - "uninstall.sh"
       - "install.ps1"
+      - "install-native.ps1"
       - "uninstall.ps1"
+      - "uninstall-native.ps1"
       - "tests/**"
       - ".github/workflows/test-installer.yml"
 
@@ -61,10 +65,28 @@ jobs:
             exit 1
           }
 
+      - name: Analyse install-native.ps1
+        shell: pwsh
+        run: |
+          $results = Invoke-ScriptAnalyzer -Path install-native.ps1 -Settings .github/PSScriptAnalyzerSettings.psd1 -Severity Warning,Error
+          if ($results) {
+            $results | Format-Table -AutoSize
+            exit 1
+          }
+
       - name: Analyse uninstall.ps1
         shell: pwsh
         run: |
           $results = Invoke-ScriptAnalyzer -Path uninstall.ps1 -Settings .github/PSScriptAnalyzerSettings.psd1 -Severity Warning,Error
+          if ($results) {
+            $results | Format-Table -AutoSize
+            exit 1
+          }
+
+      - name: Analyse uninstall-native.ps1
+        shell: pwsh
+        run: |
+          $results = Invoke-ScriptAnalyzer -Path uninstall-native.ps1 -Settings .github/PSScriptAnalyzerSettings.psd1 -Severity Warning,Error
           if ($results) {
             $results | Format-Table -AutoSize
             exit 1
@@ -134,6 +156,17 @@ jobs:
           $result = Invoke-Pester -Configuration $config
           if ($result.FailedCount -gt 0) { exit 1 }
 
+      - name: Run install native tests
+        shell: pwsh
+        run: |
+          $config = New-PesterConfiguration
+          $config.Run.Path = "tests/test_install_native.ps1"
+          $config.Output.Verbosity = "Detailed"
+          $config.TestResult.Enabled = $true
+          $config.TestResult.OutputPath = "test-results-install-native.xml"
+          $result = Invoke-Pester -Configuration $config
+          if ($result.FailedCount -gt 0) { exit 1 }
+
       - name: Run uninstall tests
         shell: pwsh
         run: |
@@ -142,6 +175,17 @@ jobs:
           $config.Output.Verbosity = "Detailed"
           $config.TestResult.Enabled = $true
           $config.TestResult.OutputPath = "test-results-uninstall.xml"
+          $result = Invoke-Pester -Configuration $config
+          if ($result.FailedCount -gt 0) { exit 1 }
+
+      - name: Run uninstall native tests
+        shell: pwsh
+        run: |
+          $config = New-PesterConfiguration
+          $config.Run.Path = "tests/test_uninstall_native.ps1"
+          $config.Output.Verbosity = "Detailed"
+          $config.TestResult.Enabled = $true
+          $config.TestResult.OutputPath = "test-results-uninstall-native.xml"
           $result = Invoke-Pester -Configuration $config
           if ($result.FailedCount -gt 0) { exit 1 }
 

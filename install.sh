@@ -9,7 +9,7 @@
 # Install with:
 #   curl -fsSL https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.sh | bash
 #
-# Windows:
+# Windows (WSL2 bootstrap):
 #   irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.ps1 | iex
 
 set -eu
@@ -30,8 +30,14 @@ COQUI_DOWNLOAD_BASE="https://github.com/${COQUI_GITHUB_OWNER}/${COQUI_GITHUB_REP
 REQUIRED_PHP_MAJOR=8
 REQUIRED_PHP_MINOR=4
 
-# PHP extensions required by Coqui and php-agents
-REQUIRED_EXTENSIONS="curl mbstring openssl pdo_sqlite readline xml zip"
+# PHP extensions required to boot Coqui successfully.
+REQUIRED_EXTENSIONS="dom mbstring pdo_sqlite xml"
+
+# Recommended extensions for a smooth default install.
+RECOMMENDED_EXTENSIONS="curl readline zip"
+
+# Optional bundled-feature extensions.
+OPTIONAL_EXTENSIONS="gd"
 
 # ─── Mode flags (set via CLI arguments) ──────────────────────────────────────
 
@@ -120,6 +126,8 @@ show_usage() {
     echo ""
     echo "  # Coqui only (user has PHP already)"
     echo "  ./install.sh --install-coqui"
+    echo ""
+    echo "Windows note: use the PowerShell WSL2 bootstrap or run this script inside WSL2."
 }
 
 # ─── Output helpers ──────────────────────────────────────────────────────────
@@ -297,7 +305,7 @@ install_php() {
                 $SUDO apt-get update -qq
 
                 local phpv="${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}"
-                local packages="php${phpv}-cli php${phpv}-curl php${phpv}-mbstring php${phpv}-xml php${phpv}-zip php${phpv}-intl php${phpv}-readline php${phpv}-sqlite3"
+                local packages="php${phpv}-cli php${phpv}-curl php${phpv}-gd php${phpv}-mbstring php${phpv}-xml php${phpv}-zip php${phpv}-intl php${phpv}-readline php${phpv}-sqlite3"
 
                 status "Installing PHP ${phpv} and extensions..."
                 # shellcheck disable=SC2086
@@ -321,7 +329,7 @@ install_php() {
             if confirm "Install PHP via ${PKG_MANAGER}?"; then
                 status "Installing PHP via ${PKG_MANAGER}..."
                 # shellcheck disable=SC2086
-                $SUDO ${PKG_MANAGER} install -y php-cli php-curl php-mbstring php-xml php-zip php-intl php-pdo >/dev/null
+                $SUDO ${PKG_MANAGER} install -y php-cli php-curl php-gd php-mbstring php-xml php-zip php-intl php-pdo >/dev/null
                 success "PHP installed"
             else
                 fatal "PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ is required."
@@ -340,7 +348,7 @@ install_php() {
             if confirm "Install PHP via apk?"; then
                 status "Installing PHP via apk..."
                 local phpv="${REQUIRED_PHP_MAJOR}${REQUIRED_PHP_MINOR}"
-                $SUDO apk add --no-cache php${phpv} php${phpv}-cli php${phpv}-curl php${phpv}-mbstring php${phpv}-xml php${phpv}-zip php${phpv}-intl php${phpv}-pdo_sqlite >/dev/null
+                $SUDO apk add --no-cache php${phpv} php${phpv}-cli php${phpv}-curl php${phpv}-gd php${phpv}-mbstring php${phpv}-xml php${phpv}-zip php${phpv}-intl php${phpv}-pdo_sqlite >/dev/null
                 success "PHP installed"
             else
                 fatal "PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ is required."
@@ -362,8 +370,11 @@ install_php() {
             ;;
         *)
             echo ""
-            echo "  Please install PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ with the following extensions:"
-            echo "    curl, mbstring, pdo_sqlite, xml, zip, intl"
+            echo "  Please install PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ with these core extensions:"
+            echo "    dom, mbstring, pdo_sqlite, xml"
+            echo ""
+            echo "  Recommended extensions for the default Coqui install:"
+            echo "    curl, readline, zip, gd"
             echo ""
             echo "  See: https://www.php.net/manual/en/install.php"
             echo ""
@@ -377,31 +388,42 @@ install_php() {
 check_extensions() {
     status "Checking PHP extensions..."
 
-    local missing=""
+    local missing_required=""
+    local missing_recommended=""
+    local missing_optional=""
     local loaded
     loaded="$(php -m 2>/dev/null)"
 
     for ext in $REQUIRED_EXTENSIONS; do
         if ! echo "$loaded" | grep -qi "^${ext}$"; then
-            missing="${missing} ${ext}"
+            missing_required="${missing_required} ${ext}"
         fi
     done
 
-    if [ -z "$missing" ]; then
-        success "All required extensions available"
-        return
-    fi
+    for ext in $RECOMMENDED_EXTENSIONS; do
+        if ! echo "$loaded" | grep -qi "^${ext}$"; then
+            missing_recommended="${missing_recommended} ${ext}"
+        fi
+    done
 
-    warn "Missing PHP extensions:${missing}"
+    for ext in $OPTIONAL_EXTENSIONS; do
+        if ! echo "$loaded" | grep -qi "^${ext}$"; then
+            missing_optional="${missing_optional} ${ext}"
+        fi
+    done
 
-    if [ "$PKG_MANAGER" = "apt" ]; then
+    if [ -n "$missing_required" ]; then
+        warn "Missing required PHP extensions:${missing_required}"
+
+        if [ "$PKG_MANAGER" = "apt" ]; then
         local phpv
         phpv="$(php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;')"
 
         # Map extension names to apt package names
         local packages=""
-        for ext in $missing; do
+        for ext in $missing_required; do
             case "$ext" in
+                dom|xml)    packages="${packages} php${phpv}-xml" ;;
                 pdo_sqlite) packages="${packages} php${phpv}-sqlite3" ;;
                 *)          packages="${packages} php${phpv}-${ext}" ;;
             esac
@@ -413,12 +435,13 @@ check_extensions() {
             $SUDO apt-get install -y -qq $packages >/dev/null
             success "Extensions installed"
         else
-            fatal "Required extensions missing:${missing}"
+            fatal "Required extensions missing:${missing_required}"
         fi
-    elif [ "$PKG_MANAGER" = "dnf" ] || [ "$PKG_MANAGER" = "yum" ]; then
+        elif [ "$PKG_MANAGER" = "dnf" ] || [ "$PKG_MANAGER" = "yum" ]; then
         local packages=""
-        for ext in $missing; do
+        for ext in $missing_required; do
             case "$ext" in
+                dom|xml)    packages="${packages} php-xml" ;;
                 pdo_sqlite) packages="${packages} php-pdo" ;;
                 *)          packages="${packages} php-${ext}" ;;
             esac
@@ -429,13 +452,16 @@ check_extensions() {
             $SUDO ${PKG_MANAGER} install -y $packages >/dev/null
             success "Extensions installed"
         else
-            fatal "Required extensions missing:${missing}"
+            fatal "Required extensions missing:${missing_required}"
         fi
-    elif [ "$PKG_MANAGER" = "apk" ]; then
+        elif [ "$PKG_MANAGER" = "apk" ]; then
         local phpv="${REQUIRED_PHP_MAJOR}${REQUIRED_PHP_MINOR}"
         local packages=""
-        for ext in $missing; do
-            packages="${packages} php${phpv}-${ext}"
+        for ext in $missing_required; do
+            case "$ext" in
+                dom|xml)    packages="${packages} php${phpv}-xml" ;;
+                *)          packages="${packages} php${phpv}-${ext}" ;;
+            esac
         done
         if confirm "Install missing extensions via apk?"; then
             status "Installing:${packages}"
@@ -443,20 +469,39 @@ check_extensions() {
             $SUDO apk add --no-cache $packages >/dev/null
             success "Extensions installed"
         else
-            fatal "Required extensions missing:${missing}"
+            fatal "Required extensions missing:${missing_required}"
         fi
-    elif [ "$PKG_MANAGER" = "nix" ]; then
-        warn "Missing extensions:${missing}. Nix manages PHP extensions via its derivation configuration. Please ensure your Nix environment has these extensions enabled."
-        if ! confirm "Ignore missing extensions warning and continue?"; then
-             fatal "Required extensions missing:${missing}"
+        elif [ "$PKG_MANAGER" = "nix" ]; then
+        warn "Missing required extensions:${missing_required}. Nix manages PHP extensions via derivation configuration. Ensure your Nix PHP package exposes these modules."
+        if ! confirm "Ignore missing required extension warning and continue?"; then
+             fatal "Required extensions missing:${missing_required}"
         fi
-    else
+        else
         # pacman and brew generally bundle these extensions with their base php packages,
         # or require manual edits to php.ini to enable them.
         echo ""
-        echo "  Please enable or install the following PHP extensions:${missing}"
+        echo "  Please enable or install the following required PHP extensions:${missing_required}"
         echo ""
         fatal "Required PHP extensions missing."
+        fi
+
+        loaded="$(php -m 2>/dev/null)"
+    fi
+
+    if [ -n "$missing_recommended" ]; then
+        warn "Missing recommended PHP extensions:${missing_recommended}"
+        echo "  These improve the default Coqui experience: curl for faster HTTP providers, readline for REPL ergonomics, and zip for office document extraction."
+    fi
+
+    if [ -n "$missing_optional" ]; then
+        warn "Missing optional PHP extensions:${missing_optional}"
+        echo "  The bundled image toolkit uses gd for low-fidelity REPL previews."
+    fi
+
+    if [ -z "$missing_required$missing_recommended$missing_optional" ]; then
+        success "All core and recommended extensions available"
+    else
+        success "Core extension check complete"
     fi
 }
 

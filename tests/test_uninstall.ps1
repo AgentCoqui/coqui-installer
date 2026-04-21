@@ -3,9 +3,95 @@
 # Pester tests for uninstall.ps1
 # Run: Invoke-Pester ./tests/test_uninstall.ps1 -Output Detailed
 
+Describe "uninstall.ps1" {
+
 BeforeAll {
     $ScriptDir = Split-Path -Parent $PSScriptRoot
     $UninstallScript = Join-Path $ScriptDir "uninstall.ps1"
+
+    function New-FakeWslScript {
+        $path = Join-Path $env:TEMP "fake-wsl-uninstall-$(Get-Random).ps1"
+        @'
+param(
+    [Parameter(ValueFromRemainingArguments = $true)][string[]]$RemainingArgs
+)
+
+$joined = $RemainingArgs -join ' '
+$logPath = $env:COQUI_TEST_WSL_LOG
+if ($logPath) {
+    Add-Content -Path $logPath -Value ("ARGS:" + $joined)
+}
+
+$pipelineChunks = @($input)
+$stdin = [Console]::In.ReadToEnd()
+if ([string]::IsNullOrWhiteSpace($stdin) -and $pipelineChunks.Count -gt 0) {
+    $stdin = $pipelineChunks -join [Environment]::NewLine
+}
+if ([string]::IsNullOrWhiteSpace($stdin) -and -not [string]::IsNullOrWhiteSpace($env:COQUI_UNINSTALL_SH_CONTENT)) {
+    $stdin = $env:COQUI_UNINSTALL_SH_CONTENT
+}
+if ($logPath -and -not [string]::IsNullOrWhiteSpace($stdin)) {
+    Add-Content -Path $logPath -Value ("STDIN:" + $stdin.TrimEnd())
+}
+
+function Emit-Lines([string]$text) {
+    if (-not [string]::IsNullOrWhiteSpace($text)) {
+        $text -split "`n" | ForEach-Object { Write-Output $_ }
+    }
+}
+
+function Env-Exit([string]$name, [int]$default = 0) {
+    $value = [Environment]::GetEnvironmentVariable($name)
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return $default
+    }
+    return [int]$value
+}
+
+if ($joined -eq '-l -v') {
+    Emit-Lines $env:COQUI_TEST_WSL_LIST_OUTPUT
+    exit (Env-Exit 'COQUI_TEST_WSL_LIST_EXIT')
+}
+
+if ($joined -eq '-d Ubuntu -- bash -lc printf coqui-ready') {
+    if ([string]::IsNullOrWhiteSpace($env:COQUI_TEST_WSL_READY_OUTPUT)) {
+        Write-Output 'coqui-ready'
+    } else {
+        Emit-Lines $env:COQUI_TEST_WSL_READY_OUTPUT
+    }
+    exit (Env-Exit 'COQUI_TEST_WSL_READY_EXIT')
+}
+
+if ($joined -like '-d Ubuntu -- bash -s --*') {
+    Emit-Lines $env:COQUI_TEST_WSL_RUN_OUTPUT
+    exit (Env-Exit 'COQUI_TEST_WSL_RUN_EXIT')
+}
+
+Write-Error "Unhandled fake wsl args: $joined"
+exit 1
+'@ | Set-Content -Path $path
+        return $path
+    }
+
+    function Clear-TestEnv {
+        foreach ($name in @(
+            'COQUI_WSL_EXE',
+            'COQUI_UNINSTALL_SH_CONTENT',
+            'COQUI_TEST_WSL_LOG',
+            'COQUI_TEST_WSL_LIST_OUTPUT',
+            'COQUI_TEST_WSL_LIST_EXIT',
+            'COQUI_TEST_WSL_READY_OUTPUT',
+            'COQUI_TEST_WSL_READY_EXIT',
+            'COQUI_TEST_WSL_RUN_OUTPUT',
+            'COQUI_TEST_WSL_RUN_EXIT'
+        )) {
+            Remove-Item "Env:$name" -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+AfterEach {
+    Clear-TestEnv
 }
 
 Describe "uninstall.ps1 argument parsing" {
@@ -15,243 +101,72 @@ Describe "uninstall.ps1 argument parsing" {
         $LASTEXITCODE | Should -Be 0
     }
 
-    It "-Help output contains usage info" {
+    It "-Help output describes the WSL2 uninstall flow" {
         $result = & pwsh -NonInteractive -NoProfile -File $UninstallScript -Help 2>&1
-        ($result -join "`n") | Should -Match "Usage|uninstall"
+        $joined = $result -join "`n"
+        $joined | Should -Match "WSL2"
+        $joined | Should -Match "WSL2-based Coqui install"
+        $joined | Should -Match "RemoveWorkspace"
     }
 }
 
-Describe "uninstall.ps1 not-installed guard" {
+Describe "uninstall.ps1 WSL bootstrap flow" {
 
-    It "exits 0 when Coqui is not installed" {
-        $fakeDir = Join-Path $env:TEMP "coqui-not-installed-$(Get-Random)"
-        $env:COQUI_INSTALL_DIR = $fakeDir
+    It "runs under Windows PowerShell without banner encoding failure" {
+        $fakeWsl = New-FakeWslScript
+        $logPath = Join-Path $env:TEMP "coqui-wsl-uninstall-log-$(Get-Random).txt"
 
-        & pwsh -NonInteractive -NoProfile -File $UninstallScript -Force 2>&1 | Out-Null
-        $LASTEXITCODE | Should -Be 0
+        $env:COQUI_WSL_EXE = $fakeWsl
+        $env:COQUI_UNINSTALL_SH_CONTENT = "echo bootstrap-uninstall"
+        $env:COQUI_TEST_WSL_LOG = $logPath
+        $env:COQUI_TEST_WSL_LIST_OUTPUT = "  NAME STATE VERSION`n* Ubuntu Running 2"
 
-        $env:COQUI_INSTALL_DIR = $null
+        $result = & powershell -NoProfile -NonInteractive -File $UninstallScript -Force 2>&1
+        $joined = $result -join "`n"
+
+        $joined | Should -Not -Match "An unexpected error occurred"
+        $joined | Should -Match "Coqui Uninstaller \(Windows via WSL2\)"
+
+        $log = Get-Content -Path $logPath -Raw
+        $log | Should -Match ([regex]::Escape("ARGS:-d Ubuntu -- bash -s -- --force"))
+
+        Remove-Item -Path $fakeWsl -Force
+        Remove-Item -Path $logPath -Force
     }
 
-    It "warns when Coqui is not installed" {
-        $fakeDir = Join-Path $env:TEMP "coqui-not-installed-$(Get-Random)"
-        $env:COQUI_INSTALL_DIR = $fakeDir
+    It "runs uninstall.sh inside WSL2 and forwards flags" {
+        $fakeWsl = New-FakeWslScript
+        $logPath = Join-Path $env:TEMP "coqui-wsl-uninstall-log-$(Get-Random).txt"
 
-        $result = & pwsh -NonInteractive -NoProfile -File $UninstallScript -Force 2>&1
-        ($result -join "`n") | Should -Match "not installed"
+        $env:COQUI_WSL_EXE = $fakeWsl
+        $env:COQUI_UNINSTALL_SH_CONTENT = "echo bootstrap-uninstall"
+        $env:COQUI_TEST_WSL_LOG = $logPath
+        $env:COQUI_TEST_WSL_LIST_OUTPUT = "  NAME STATE VERSION`n* Ubuntu Running 2"
 
-        $env:COQUI_INSTALL_DIR = $null
-    }
-}
+        & pwsh -NonInteractive -NoProfile -File $UninstallScript -RemoveWorkspace -Force -Quiet 2>&1 | Out-Null
 
-Describe "uninstall.ps1 release install removal" {
+        $log = Get-Content -Path $logPath -Raw
+        $log | Should -Match ([regex]::Escape("ARGS:-d Ubuntu -- bash -s -- --remove-workspace --force --quiet"))
+        $log | Should -Match "STDIN:echo bootstrap-uninstall"
 
-    It "-Force removes release install directory" {
-        $testDir = Join-Path $env:TEMP "coqui-uninstall-$(Get-Random)"
-        New-Item -ItemType Directory -Path $testDir -Force | Out-Null
-        Set-Content -Path (Join-Path $testDir ".coqui-version") -Value "1.0.0"
-
-        $env:COQUI_INSTALL_DIR = $testDir
-        & pwsh -NonInteractive -NoProfile -File $UninstallScript -Force 2>&1 | Out-Null
-
-        Test-Path $testDir | Should -Be $false
-        $env:COQUI_INSTALL_DIR = $null
+        Remove-Item -Path $fakeWsl -Force
+        Remove-Item -Path $logPath -Force
     }
 
-    It "-Force removes dev install directory" {
-        $testDir = Join-Path $env:TEMP "coqui-uninstall-dev-$(Get-Random)"
-        New-Item -ItemType Directory -Path (Join-Path $testDir ".git") -Force | Out-Null
+    It "requires the supported WSL2 setup before uninstalling" {
+        $fakeWsl = New-FakeWslScript
 
-        $env:COQUI_INSTALL_DIR = $testDir
-        & pwsh -NonInteractive -NoProfile -File $UninstallScript -Force 2>&1 | Out-Null
+        $env:COQUI_WSL_EXE = $fakeWsl
+        $env:COQUI_TEST_WSL_LIST_OUTPUT = "  NAME STATE VERSION"
 
-        Test-Path $testDir | Should -Be $false
-        $env:COQUI_INSTALL_DIR = $null
-    }
+        $result = & pwsh -NonInteractive -NoProfile -File $UninstallScript 2>&1
+        $joined = $result -join "`n"
 
-    It "-Force exits 0 on successful removal" {
-        $testDir = Join-Path $env:TEMP "coqui-uninstall-ok-$(Get-Random)"
-        New-Item -ItemType Directory -Path $testDir -Force | Out-Null
-        Set-Content -Path (Join-Path $testDir ".coqui-version") -Value "1.0.0"
+        $joined | Should -Match "Use install\.ps1"
+        $joined | Should -Match "WSL2 distro 'Ubuntu' is not ready"
 
-        $env:COQUI_INSTALL_DIR = $testDir
-        & pwsh -NonInteractive -NoProfile -File $UninstallScript -Force 2>&1 | Out-Null
-        $LASTEXITCODE | Should -Be 0
-
-        $env:COQUI_INSTALL_DIR = $null
+        Remove-Item -Path $fakeWsl -Force
     }
 }
 
-Describe "uninstall.ps1 workspace preservation" {
-
-    It "preserves workspace by default (-Force without -RemoveWorkspace)" {
-        $testDir = Join-Path $env:TEMP "coqui-ws-preserve-$(Get-Random)"
-        New-Item -ItemType Directory -Path $testDir -Force | Out-Null
-        Set-Content -Path (Join-Path $testDir ".coqui-version") -Value "1.0.0"
-        $wsDir = Join-Path $testDir ".workspace"
-        New-Item -ItemType Directory -Path $wsDir -Force | Out-Null
-        Set-Content -Path (Join-Path $wsDir "session.json") -Value '{"key":"value"}'
-
-        $env:COQUI_INSTALL_DIR = $testDir
-        & pwsh -NonInteractive -NoProfile -File $UninstallScript -Force 2>&1 | Out-Null
-
-        $sessionFile = Join-Path $testDir ".workspace\session.json"
-        Test-Path $sessionFile | Should -Be $true
-        Get-Content $sessionFile | Should -Match "value"
-
-        $env:COQUI_INSTALL_DIR = $null
-        Remove-Item -Path $testDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
-
-    It "-RemoveWorkspace deletes workspace directory" {
-        $testDir = Join-Path $env:TEMP "coqui-ws-remove-$(Get-Random)"
-        New-Item -ItemType Directory -Path $testDir -Force | Out-Null
-        Set-Content -Path (Join-Path $testDir ".coqui-version") -Value "1.0.0"
-        $wsDir = Join-Path $testDir ".workspace"
-        New-Item -ItemType Directory -Path $wsDir -Force | Out-Null
-        Set-Content -Path (Join-Path $wsDir "session.json") -Value '{"key":"value"}'
-
-        $env:COQUI_INSTALL_DIR = $testDir
-        & pwsh -NonInteractive -NoProfile -File $UninstallScript -Force -RemoveWorkspace 2>&1 | Out-Null
-
-        Test-Path $testDir | Should -Be $false
-
-        $env:COQUI_INSTALL_DIR = $null
-    }
-
-    It "removes install files but not workspace contents" {
-        $testDir = Join-Path $env:TEMP "coqui-ws-files-$(Get-Random)"
-        New-Item -ItemType Directory -Path (Join-Path $testDir "bin") -Force | Out-Null
-        New-Item -ItemType Directory -Path (Join-Path $testDir "src") -Force | Out-Null
-        Set-Content -Path (Join-Path $testDir ".coqui-version") -Value "1.0.0"
-        Set-Content -Path (Join-Path $testDir "bin\coqui") -Value "#!/usr/bin/env php"
-        $wsDir = Join-Path $testDir ".workspace"
-        New-Item -ItemType Directory -Path $wsDir -Force | Out-Null
-        Set-Content -Path (Join-Path $wsDir "data.txt") -Value "user-data"
-
-        $env:COQUI_INSTALL_DIR = $testDir
-        & pwsh -NonInteractive -NoProfile -File $UninstallScript -Force 2>&1 | Out-Null
-
-        # App files should be gone
-        Test-Path (Join-Path $testDir "bin") | Should -Be $false
-        Test-Path (Join-Path $testDir ".coqui-version") | Should -Be $false
-
-        # Workspace should remain
-        Test-Path (Join-Path $testDir ".workspace\data.txt") | Should -Be $true
-
-        $env:COQUI_INSTALL_DIR = $null
-        Remove-Item -Path $testDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
-}
-
-Describe "uninstall.ps1 wrapper removal" {
-
-    It "removes coqui.bat wrapper when present" {
-        $testDir = Join-Path $env:TEMP "coqui-wrapper-$(Get-Random)"
-        New-Item -ItemType Directory -Path $testDir -Force | Out-Null
-        Set-Content -Path (Join-Path $testDir ".coqui-version") -Value "1.0.0"
-
-        # Create a fake wrapper in the expected location
-        $CoquiBinDir = Join-Path $env:LOCALAPPDATA "Programs\Coqui\bin"
-        New-Item -ItemType Directory -Path $CoquiBinDir -Force | Out-Null
-        $CoquiBat = Join-Path $CoquiBinDir "coqui.bat"
-        Set-Content -Path $CoquiBat -Value "@php `"%~dp0..\coqui\bin\coqui`" %*"
-
-        $env:COQUI_INSTALL_DIR = $testDir
-        & pwsh -NonInteractive -NoProfile -File $UninstallScript -Force 2>&1 | Out-Null
-
-        Test-Path $CoquiBat | Should -Be $false
-
-        $env:COQUI_INSTALL_DIR = $null
-        Remove-Item -Path $testDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
-}
-
-Describe "uninstall.ps1 PATH cleanup" {
-
-    It "removes Coqui bin directory from user PATH" {
-        $testDir = Join-Path $env:TEMP "coqui-path-$(Get-Random)"
-        New-Item -ItemType Directory -Path $testDir -Force | Out-Null
-        Set-Content -Path (Join-Path $testDir ".coqui-version") -Value "1.0.0"
-
-        $CoquiBinDir = Join-Path $env:LOCALAPPDATA "Programs\Coqui\bin"
-
-        # Add Coqui bin to user PATH temporarily for this test
-        $OriginalPath = [Environment]::GetEnvironmentVariable("PATH", "User")
-        [Environment]::SetEnvironmentVariable("PATH", "$OriginalPath;$CoquiBinDir", "User")
-
-        $env:COQUI_INSTALL_DIR = $testDir
-        & pwsh -NonInteractive -NoProfile -File $UninstallScript -Force 2>&1 | Out-Null
-
-        $NewPath = [Environment]::GetEnvironmentVariable("PATH", "User")
-        $NewPath | Should -Not -Match [regex]::Escape($CoquiBinDir)
-
-        # Restore PATH
-        [Environment]::SetEnvironmentVariable("PATH", $OriginalPath, "User")
-
-        $env:COQUI_INSTALL_DIR = $null
-        Remove-Item -Path $testDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
-}
-
-Describe "uninstall.ps1 installation detection" {
-
-    It "Test-DevInstalled returns true for dir with .git" {
-        $testDir = Join-Path $env:TEMP "coqui-detect-dev-$(Get-Random)"
-        New-Item -ItemType Directory -Path (Join-Path $testDir ".git") -Force | Out-Null
-
-        $result = & pwsh -NonInteractive -NoProfile -Command {
-            param($dir)
-            $COQUI_INSTALL_DIR = $dir
-            function Test-DevInstalled {
-                $GitPath = Join-Path $COQUI_INSTALL_DIR ".git"
-                return (Test-Path $COQUI_INSTALL_DIR) -and (Test-Path $GitPath)
-            }
-            Test-DevInstalled
-        } -args $testDir
-
-        $result | Should -Be $true
-        Remove-Item -Path $testDir -Recurse -Force
-    }
-
-    It "Test-ReleaseInstalled returns true for dir with .coqui-version" {
-        $testDir = Join-Path $env:TEMP "coqui-detect-rel-$(Get-Random)"
-        New-Item -ItemType Directory -Path $testDir -Force | Out-Null
-        Set-Content -Path (Join-Path $testDir ".coqui-version") -Value "2.0.0"
-
-        $result = & pwsh -NonInteractive -NoProfile -Command {
-            param($dir)
-            $COQUI_INSTALL_DIR = $dir
-            function Test-ReleaseInstalled {
-                $VersionFile = Join-Path $COQUI_INSTALL_DIR ".coqui-version"
-                return (Test-Path $COQUI_INSTALL_DIR) -and (Test-Path $VersionFile)
-            }
-            Test-ReleaseInstalled
-        } -args $testDir
-
-        $result | Should -Be $true
-        Remove-Item -Path $testDir -Recurse -Force
-    }
-
-    It "Get-InstalledVersion returns correct version string" {
-        $testDir = Join-Path $env:TEMP "coqui-detect-ver-$(Get-Random)"
-        New-Item -ItemType Directory -Path $testDir -Force | Out-Null
-        Set-Content -Path (Join-Path $testDir ".coqui-version") -Value "7.8.9"
-
-        $result = & pwsh -NonInteractive -NoProfile -Command {
-            param($dir)
-            $COQUI_INSTALL_DIR = $dir
-            function Get-InstalledVersion {
-                $VersionFile = Join-Path $COQUI_INSTALL_DIR ".coqui-version"
-                if (Test-Path $VersionFile) {
-                    return (Get-Content -Path $VersionFile -Raw).Trim()
-                }
-                return ""
-            }
-            Get-InstalledVersion
-        } -args $testDir
-
-        $result | Should -Be "7.8.9"
-        Remove-Item -Path $testDir -Recurse -Force
-    }
 }

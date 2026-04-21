@@ -32,6 +32,21 @@ INSTALL_SCRIPT="$SCRIPT_DIR/install.sh"
     echo "$output" | grep -q -- "--non-interactive"
 }
 
+@test "install.sh --help points Windows users to the WSL2 bootstrap" {
+    run bash "$INSTALL_SCRIPT" --help
+    echo "$output" | grep -q "PowerShell WSL2 bootstrap"
+}
+
+@test "install.sh declares dom as a required extension" {
+    run grep -q 'REQUIRED_EXTENSIONS="dom mbstring pdo_sqlite xml"' "$INSTALL_SCRIPT"
+    [ "$status" -eq 0 ]
+}
+
+@test "install.sh no longer declares openssl as a required extension" {
+    run grep -q 'REQUIRED_EXTENSIONS=".*openssl' "$INSTALL_SCRIPT"
+    [ "$status" -ne 0 ]
+}
+
 @test "install.sh unknown argument exits 1" {
     run bash "$INSTALL_SCRIPT" --unknown-flag-xyz
     [ "$status" -eq 1 ]
