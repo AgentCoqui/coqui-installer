@@ -92,18 +92,12 @@ Verify:
 
 ## Third Priority: Native Compatibility Cleanup
 
-There is at least one known code-versus-test mismatch right now.
+Keep native Windows aligned with the supported installer's minimal boot requirements.
 
-### Known mismatch to resolve
+### Current expectation
 
-- `tests/test_install_native.ps1` currently expects `install-native.ps1` to declare `dom`, `mbstring`, `pdo_sqlite`, and `xml` as required extensions, and to drop `openssl`.
-- `install-native.ps1` currently still declares `curl`, `mbstring`, `openssl`, `pdo_sqlite`, `readline`, `xml`, and `zip` as required extensions.
-
-Do not patch this blindly. Decide which one is correct, then align all three surfaces:
-
-- `install-native.ps1`
-- `tests/test_install_native.ps1`
-- any native-only docs that describe extension expectations
+- `install-native.ps1` should enforce the same boot-critical PHP extensions as `install.sh`: `dom`, `mbstring`, `pdo_sqlite`, and `xml`.
+- Native-only docs should keep describing the path as deprecated and unsupported, without expanding it into a first-class platform.
 
 Prefer the smallest change that keeps native Windows clearly unsupported.
 

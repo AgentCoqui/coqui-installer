@@ -3,6 +3,8 @@
 # Pester tests for uninstall.ps1
 # Run: Invoke-Pester ./tests/test_uninstall.ps1 -Output Detailed
 
+Describe "uninstall.ps1" {
+
 BeforeAll {
     $ScriptDir = Split-Path -Parent $PSScriptRoot
     $UninstallScript = Join-Path $ScriptDir "uninstall.ps1"
@@ -10,15 +12,24 @@ BeforeAll {
     function New-FakeWslScript {
         $path = Join-Path $env:TEMP "fake-wsl-uninstall-$(Get-Random).ps1"
         @'
-param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Args)
+param(
+    [Parameter(ValueFromRemainingArguments = $true)][string[]]$RemainingArgs
+)
 
-$joined = $Args -join ' '
+$joined = $RemainingArgs -join ' '
 $logPath = $env:COQUI_TEST_WSL_LOG
 if ($logPath) {
     Add-Content -Path $logPath -Value ("ARGS:" + $joined)
 }
 
+$pipelineChunks = @($input)
 $stdin = [Console]::In.ReadToEnd()
+if ([string]::IsNullOrWhiteSpace($stdin) -and $pipelineChunks.Count -gt 0) {
+    $stdin = $pipelineChunks -join [Environment]::NewLine
+}
+if ([string]::IsNullOrWhiteSpace($stdin) -and -not [string]::IsNullOrWhiteSpace($env:COQUI_UNINSTALL_SH_CONTENT)) {
+    $stdin = $env:COQUI_UNINSTALL_SH_CONTENT
+}
 if ($logPath -and -not [string]::IsNullOrWhiteSpace($stdin)) {
     Add-Content -Path $logPath -Value ("STDIN:" + $stdin.TrimEnd())
 }
@@ -101,6 +112,28 @@ Describe "uninstall.ps1 argument parsing" {
 
 Describe "uninstall.ps1 WSL bootstrap flow" {
 
+    It "runs under Windows PowerShell without banner encoding failure" {
+        $fakeWsl = New-FakeWslScript
+        $logPath = Join-Path $env:TEMP "coqui-wsl-uninstall-log-$(Get-Random).txt"
+
+        $env:COQUI_WSL_EXE = $fakeWsl
+        $env:COQUI_UNINSTALL_SH_CONTENT = "echo bootstrap-uninstall"
+        $env:COQUI_TEST_WSL_LOG = $logPath
+        $env:COQUI_TEST_WSL_LIST_OUTPUT = "  NAME STATE VERSION`n* Ubuntu Running 2"
+
+        $result = & powershell -NoProfile -NonInteractive -File $UninstallScript -Force 2>&1
+        $joined = $result -join "`n"
+
+        $joined | Should -Not -Match "An unexpected error occurred"
+        $joined | Should -Match "Coqui Uninstaller \(Windows via WSL2\)"
+
+        $log = Get-Content -Path $logPath -Raw
+        $log | Should -Match ([regex]::Escape("ARGS:-d Ubuntu -- bash -s -- --force"))
+
+        Remove-Item -Path $fakeWsl -Force
+        Remove-Item -Path $logPath -Force
+    }
+
     It "runs uninstall.sh inside WSL2 and forwards flags" {
         $fakeWsl = New-FakeWslScript
         $logPath = Join-Path $env:TEMP "coqui-wsl-uninstall-log-$(Get-Random).txt"
@@ -113,7 +146,7 @@ Describe "uninstall.ps1 WSL bootstrap flow" {
         & pwsh -NonInteractive -NoProfile -File $UninstallScript -RemoveWorkspace -Force -Quiet 2>&1 | Out-Null
 
         $log = Get-Content -Path $logPath -Raw
-        $log | Should -Match [regex]::Escape("ARGS:-d Ubuntu -- bash -s -- --remove-workspace --force --quiet")
+        $log | Should -Match ([regex]::Escape("ARGS:-d Ubuntu -- bash -s -- --remove-workspace --force --quiet"))
         $log | Should -Match "STDIN:echo bootstrap-uninstall"
 
         Remove-Item -Path $fakeWsl -Force
@@ -134,4 +167,6 @@ Describe "uninstall.ps1 WSL bootstrap flow" {
 
         Remove-Item -Path $fakeWsl -Force
     }
+}
+
 }

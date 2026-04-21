@@ -7,6 +7,8 @@ One liner for [Coqui](https://github.com/AgentCoqui/coqui) — a terminal AI age
 The installer downloads the latest GitHub release by default. No Git or Composer required.
 
 > Platform note: Linux, macOS, and WSL2 are the supported install paths. On Windows, use the PowerShell WSL2 bootstrap.
+>
+> Deprecated native Windows scripts remain in the repository for at-risk users only. See [docs/NATIVE-WINDOWS-DEPRECATED.md](docs/NATIVE-WINDOWS-DEPRECATED.md).
 
 ### Bash Dev Mode
 

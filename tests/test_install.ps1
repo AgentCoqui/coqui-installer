@@ -3,6 +3,8 @@
 # Pester tests for install.ps1
 # Run: Invoke-Pester ./tests/test_install.ps1 -Output Detailed
 
+Describe "install.ps1" {
+
 BeforeAll {
     $ScriptDir = Split-Path -Parent $PSScriptRoot
     $InstallScript = Join-Path $ScriptDir "install.ps1"
@@ -10,15 +12,24 @@ BeforeAll {
     function New-FakeWslScript {
         $path = Join-Path $env:TEMP "fake-wsl-install-$(Get-Random).ps1"
         @'
-param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Args)
+param(
+    [Parameter(ValueFromRemainingArguments = $true)][string[]]$RemainingArgs
+)
 
-$joined = $Args -join ' '
+$joined = $RemainingArgs -join ' '
 $logPath = $env:COQUI_TEST_WSL_LOG
 if ($logPath) {
     Add-Content -Path $logPath -Value ("ARGS:" + $joined)
 }
 
+$pipelineChunks = @($input)
 $stdin = [Console]::In.ReadToEnd()
+if ([string]::IsNullOrWhiteSpace($stdin) -and $pipelineChunks.Count -gt 0) {
+    $stdin = $pipelineChunks -join [Environment]::NewLine
+}
+if ([string]::IsNullOrWhiteSpace($stdin) -and -not [string]::IsNullOrWhiteSpace($env:COQUI_INSTALL_SH_CONTENT)) {
+    $stdin = $env:COQUI_INSTALL_SH_CONTENT
+}
 if ($logPath -and -not [string]::IsNullOrWhiteSpace($stdin)) {
     Add-Content -Path $logPath -Value ("STDIN:" + $stdin.TrimEnd())
 }
@@ -117,6 +128,28 @@ Describe "install.ps1 argument parsing" {
 
 Describe "install.ps1 WSL bootstrap flow" {
 
+    It "runs under Windows PowerShell without banner encoding failure" {
+        $fakeWsl = New-FakeWslScript
+        $logPath = Join-Path $env:TEMP "coqui-wsl-install-log-$(Get-Random).txt"
+
+        $env:COQUI_WSL_EXE = $fakeWsl
+        $env:COQUI_INSTALL_SH_CONTENT = "echo bootstrap-install"
+        $env:COQUI_TEST_WSL_LOG = $logPath
+        $env:COQUI_TEST_WSL_LIST_OUTPUT = "  NAME STATE VERSION`n* Ubuntu Running 2"
+
+        $result = & powershell -NoProfile -NonInteractive -File $InstallScript -Dev 2>&1
+        $joined = $result -join "`n"
+
+        $joined | Should -Not -Match "An unexpected error occurred"
+        $joined | Should -Match "Coqui Installer \(Windows via WSL2\)"
+
+        $log = Get-Content -Path $logPath -Raw
+        $log | Should -Match ([regex]::Escape("ARGS:-d Ubuntu -- bash -s -- --dev"))
+
+        Remove-Item -Path $fakeWsl -Force
+        Remove-Item -Path $logPath -Force
+    }
+
     It "runs install.sh inside WSL2 when the distro is ready" {
         $fakeWsl = New-FakeWslScript
         $logPath = Join-Path $env:TEMP "coqui-wsl-install-log-$(Get-Random).txt"
@@ -129,7 +162,7 @@ Describe "install.ps1 WSL bootstrap flow" {
         & pwsh -NonInteractive -NoProfile -File $InstallScript -Dev -Quiet 2>&1 | Out-Null
 
         $log = Get-Content -Path $logPath -Raw
-        $log | Should -Match [regex]::Escape("ARGS:-d Ubuntu -- bash -s -- --dev --quiet")
+        $log | Should -Match ([regex]::Escape("ARGS:-d Ubuntu -- bash -s -- --dev --quiet"))
         $log | Should -Match "STDIN:echo bootstrap-install"
 
         Remove-Item -Path $fakeWsl -Force
@@ -155,7 +188,7 @@ Describe "install.ps1 WSL bootstrap flow" {
         $joined | Should -Match "wsl -d Ubuntu"
 
         $log = Get-Content -Path $logPath -Raw
-        $log | Should -Match [regex]::Escape("ARGS:--install -d Ubuntu")
+        $log | Should -Match ([regex]::Escape("ARGS:--install -d Ubuntu"))
 
         Remove-Item -Path $fakeWsl -Force
         Remove-Item -Path $logPath -Force
@@ -174,10 +207,12 @@ Describe "install.ps1 WSL bootstrap flow" {
         & pwsh -NonInteractive -NoProfile -File $InstallScript -Quiet 2>&1 | Out-Null
 
         $log = Get-Content -Path $logPath -Raw
-        $log | Should -Match [regex]::Escape("ARGS:--set-version Ubuntu 2")
-        $log | Should -Match [regex]::Escape("ARGS:-d Ubuntu -- bash -s -- --quiet")
+        $log | Should -Match ([regex]::Escape("ARGS:--set-version Ubuntu 2"))
+        $log | Should -Match ([regex]::Escape("ARGS:-d Ubuntu -- bash -s -- --quiet"))
 
         Remove-Item -Path $fakeWsl -Force
         Remove-Item -Path $logPath -Force
     }
+}
+
 }

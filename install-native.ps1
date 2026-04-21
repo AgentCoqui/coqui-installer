@@ -48,8 +48,9 @@ $COQUI_DOWNLOAD_BASE = "https://github.com/$COQUI_GITHUB_OWNER/$COQUI_GITHUB_REP
 $REQUIRED_PHP_MAJOR = 8
 $REQUIRED_PHP_MINOR = 4
 
-# PHP extensions required by Coqui and php-agents
-$REQUIRED_EXTENSIONS = @("curl", "mbstring", "openssl", "pdo_sqlite", "readline", "xml", "zip")
+# Keep the deprecated native path aligned with the supported installer: only
+# enforce the core extensions required to boot Coqui successfully.
+$REQUIRED_EXTENSIONS = @("dom", "mbstring", "pdo_sqlite", "xml")
 
 # Mode flags
 $script:DEV_MODE = $Dev.IsPresent
@@ -836,7 +837,7 @@ function Show-Usage {
     Write-Host ""
     Write-Host "Downloads and installs Coqui directly on native Windows."
     Write-Host ""
-    Write-Host "WARNING: this native Windows path is unsupported and not recommended."
+    Write-Host "WARNING: this native Windows path is degraded, unsupported, and not recommended."
     Write-Host "Use install.ps1 for the supported WSL2 bootstrap instead."
     Write-Host ""
     Write-Host "Flags:"
@@ -858,11 +859,7 @@ function Show-Usage {
 function Show-Banner {
     if ($script:QUIET_MODE) { return }
     Write-Host ""
-    Write-Host -Object "   ▄▄·       .▄▄▄  ▄• ▄▌▪  ▄▄▄▄·       ▄▄▄▄▄" -ForegroundColor Green
-    Write-Host -Object "  ▐█ ▌▪▪     ▐▀•▀█ █▪██▌██ ▐█ ▀█▪▪     •██  " -ForegroundColor Green
-    Write-Host -Object "  ██ ▄▄ ▄█▀▄ █▌·.█▌█▌▐█▌▐█·▐█▀▀█▄ ▄█▀▄  ▐█.▪" -ForegroundColor Green
-    Write-Host -Object "  ▐███▌▐█▌.▐▌▐█▪▄█·▐█▄█▌▐█▌██▄▪▐█▐█▌.▐▌ ▐█▌·" -ForegroundColor Green
-    Write-Host -Object "  ·▀▀▀  ▀█▄▀▪·▀▀█.  ▀▀▀ ▀▀▀·▀▀▀▀  ▀█▄▀▪ ▀▀▀ " -ForegroundColor Green
+    Write-Host "  =======================================================" -ForegroundColor Green
     Write-Host ""
     Write-Host "  Coqui Native Installer (Unsupported Windows Path)"
     Write-Host ""
