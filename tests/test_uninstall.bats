@@ -154,6 +154,24 @@ UNINSTALL_SCRIPT="$SCRIPT_DIR/uninstall.sh"
     rm -rf "$bin_dir" "$test_dir"
 }
 
+@test "uninstall.sh removes launcher symlink pointing into install dir" {
+    local test_dir bin_dir
+    test_dir="$(mktemp -d)"
+    bin_dir="$(mktemp -d)"
+    echo "1.0.0" > "$test_dir/.coqui-version"
+    mkdir -p "$test_dir/bin"
+    touch "$test_dir/bin/coqui-launcher"
+
+    ln -sf "$test_dir/bin/coqui-launcher" "$bin_dir/coqui-launcher"
+
+    COQUI_INSTALL_DIR="$test_dir" PATH="$bin_dir:$PATH" run bash "$UNINSTALL_SCRIPT" --force
+
+    [ "$status" -eq 0 ]
+    [ ! -L "$bin_dir/coqui-launcher" ]
+
+    rm -rf "$bin_dir" "$test_dir"
+}
+
 # ─── Quiet mode ───────────────────────────────────────────────────────────────
 
 @test "uninstall.sh --quiet --force suppresses status output" {

@@ -200,3 +200,47 @@ INSTALL_SCRIPT="$SCRIPT_DIR/install.sh"
 
     rm -rf "$test_dir"
 }
+
+@test "install.sh create_symlink creates both coqui and coqui-launcher symlinks" {
+    local test_dir bin_dir
+    test_dir="$(mktemp -d)"
+    bin_dir="$(mktemp -d)"
+    mkdir -p "$test_dir/bin"
+    touch "$test_dir/bin/coqui" "$test_dir/bin/coqui-launcher"
+
+    run env COQUI_INSTALL_DIR="$test_dir" bash -c "
+        tmp_script=\$(mktemp)
+        trap 'rm -f "\$tmp_script"' EXIT
+        awk 'NR>1 { print prev } { prev=\$0 }' '$INSTALL_SCRIPT' > \"\$tmp_script\"
+        source \"\$tmp_script\"
+        detect_bin_dir() { BIN_DIR='$bin_dir'; }
+        create_symlink
+        [ -L '$bin_dir/coqui' ]
+        [ -L '$bin_dir/coqui-launcher' ]
+        [ \"\$(readlink '$bin_dir/coqui')\" = '$test_dir/bin/coqui' ]
+        [ \"\$(readlink '$bin_dir/coqui-launcher')\" = '$test_dir/bin/coqui-launcher' ]
+    "
+    [ "$status" -eq 0 ]
+
+    rm -rf "$bin_dir" "$test_dir"
+}
+
+@test "install.sh print_success documents launcher-first commands" {
+    local test_dir
+    test_dir="$(mktemp -d)"
+    echo "1.2.3" > "$test_dir/.coqui-version"
+
+    run env COQUI_INSTALL_DIR="$test_dir" bash -c "
+        tmp_script=\$(mktemp)
+        trap 'rm -f "\$tmp_script"' EXIT
+        awk 'NR>1 { print prev } { prev=\$0 }' '$INSTALL_SCRIPT' > \"\$tmp_script\"
+        source \"\$tmp_script\"
+        QUIET_MODE=false
+        print_success 'Install'
+    "
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "coqui --api-only"
+    echo "$output" | grep -q "coqui-launcher"
+
+    rm -rf "$test_dir"
+}
