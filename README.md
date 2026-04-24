@@ -46,11 +46,21 @@ Get-Content install.ps1 | more
 - Installs PHP 8.4+ plus the default Coqui extension set automatically when package-manager support is available
 - Downloads the latest Coqui release from GitHub (pre-built with dependencies)
 - Verifies the download with SHA-256 checksums
-- Adds `coqui` command to your PATH
+- Adds `coqui` and `coqui-launcher` commands to your PATH
 
 On Windows, the PowerShell bootstrap also checks for WSL2 readiness and then delegates to the bash installer inside your WSL distro.
 
 ## After Install
+
+`coqui` is the main entry point. It starts the full launcher-managed app: REPL in the foreground plus the API in the background.
+
+```bash
+coqui
+coqui --api-only
+coqui status
+```
+
+Use `coqui-launcher` when you want the explicit launcher name. It exposes the same launcher-managed modes.
 
 Coqui auto-discovers Composer toolkits and toolkit-provided REPL commands on boot. Install packages with `/space install <package>` or with Composer in your workspace, then restart Coqui to activate newly discovered tools and slash commands.
 

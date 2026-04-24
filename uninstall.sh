@@ -221,33 +221,39 @@ get_installed_version() {
 # ─── Symlink removal ────────────────────────────────────────────────────────
 
 remove_symlinks() {
-    status "Checking for Coqui symlinks..."
+    status "Checking for Coqui command symlinks..."
 
     local found=false
+    local command_names="coqui coqui-launcher"
 
-    # Check all possible bin directories the installer might have used
-    local bin_dirs="/opt/homebrew/bin /usr/local/bin $HOME/.local/bin"
+    # Check common bin directories plus anything currently on PATH so custom
+    # writable install locations are cleaned up too.
+    local bin_dirs
+    bin_dirs="/opt/homebrew/bin /usr/local/bin $HOME/.local/bin $(printf '%s' "$PATH" | tr ':' ' ')"
 
     for dir in $bin_dirs; do
-        local link="${dir}/coqui"
-        if [ -L "$link" ]; then
-            # Verify the symlink points into the Coqui install dir
-            local target
-            target="$(readlink "$link" 2>/dev/null || true)"
-            if echo "$target" | grep -q "$COQUI_INSTALL_DIR"; then
-                status "Removing symlink: ${link}"
-                rm -f "$link"
-                success "Removed symlink: ${link}"
-                found=true
+        local name
+        for name in $command_names; do
+            local link="${dir}/${name}"
+            if [ -L "$link" ]; then
+                # Verify the symlink points into the Coqui install dir
+                local target
+                target="$(readlink "$link" 2>/dev/null || true)"
+                if echo "$target" | grep -q "$COQUI_INSTALL_DIR"; then
+                    status "Removing symlink: ${link}"
+                    rm -f "$link"
+                    success "Removed symlink: ${link}"
+                    found=true
+                fi
+            elif [ -f "$link" ] && ! [ -L "$link" ]; then
+                # Regular file (not a symlink) — might be a manually copied script
+                warn "Found ${link} but it is not a symlink. Skipping."
             fi
-        elif [ -f "$link" ] && ! [ -L "$link" ]; then
-            # Regular file (not a symlink) — might be a manually copied script
-            warn "Found ${link} but it is not a symlink. Skipping."
-        fi
+        done
     done
 
     if [ "$found" = false ]; then
-        status "No Coqui symlinks found"
+        status "No Coqui command symlinks found"
     fi
 }
 

@@ -969,16 +969,19 @@ create_symlink() {
     detect_bin_dir
 
     local target="${COQUI_INSTALL_DIR}/bin/coqui"
+    local launcher_target="${COQUI_INSTALL_DIR}/bin/coqui-launcher"
 
-    # Ensure the bin script is executable
+    # Ensure the public wrapper and explicit launcher are executable
     chmod +x "$target"
+    chmod +x "$launcher_target"
 
-    status "Creating symlink in ${BIN_DIR}..."
+    status "Creating command symlinks in ${BIN_DIR}..."
 
     mkdir -p "$BIN_DIR"
     ln -sf "$target" "$BIN_DIR/coqui"
+    ln -sf "$launcher_target" "$BIN_DIR/coqui-launcher"
 
-    success "Symlink created: ${BIN_DIR}/coqui"
+    success "Symlinks created: ${BIN_DIR}/coqui, ${BIN_DIR}/coqui-launcher"
 
     # Warn if BIN_DIR is not in PATH
     if ! echo "$PATH" | tr ':' '\n' | grep -qx "$BIN_DIR"; then
@@ -1032,7 +1035,13 @@ print_success() {
     echo ""
     echo "  ${BOLD}Get started:${RESET}"
     echo ""
-    echo "    coqui"
+    echo "    coqui                # Start the full launcher-managed app (REPL + API)"
+    echo "    coqui --api-only     # Start only the launcher-managed API"
+    echo "    coqui status         # Inspect launcher-managed services"
+    echo ""
+    echo "  ${BOLD}Explicit launcher:${RESET}"
+    echo ""
+    echo "    coqui-launcher       # Same full app entrypoint, explicit launcher name"
     echo ""
     echo "  ${BOLD}Add cloud providers${RESET} (optional):"
     echo ""
