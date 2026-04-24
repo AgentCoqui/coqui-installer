@@ -228,7 +228,8 @@ remove_symlinks() {
 
     # Check common bin directories plus anything currently on PATH so custom
     # writable install locations are cleaned up too.
-    local bin_dirs="/opt/homebrew/bin /usr/local/bin $HOME/.local/bin $(printf '%s' "$PATH" | tr ':' ' ')"
+    local bin_dirs
+    bin_dirs="/opt/homebrew/bin /usr/local/bin $HOME/.local/bin $(printf '%s' "$PATH" | tr ':' ' ')"
 
     for dir in $bin_dirs; do
         local name
