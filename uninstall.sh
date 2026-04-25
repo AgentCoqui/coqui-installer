@@ -449,11 +449,11 @@ remove_composer() {
 show_banner() {
     if [ "$QUIET_MODE" = true ]; then return; fi
     echo ""
-    echo "  ${GREEN} ▄▄·       .▄▄▄  ▄• ▄▌▪  ▄▄▄▄·       ▄▄▄▄▄${RESET}"
-    echo "  ${GREEN}▐█ ▌▪▪     ▐▀•▀█ █▪██▌██ ▐█ ▀█▪▪     •██  ${RESET}"
-    echo "  ${GREEN}██ ▄▄ ▄█▀▄ █▌·.█▌█▌▐█▌▐█·▐█▀▀█▄ ▄█▀▄  ▐█.▪${RESET}"
-    echo "  ${GREEN}▐███▌▐█▌.▐▌▐█▪▄█·▐█▄█▌▐█▌██▄▪▐█▐█▌.▐▌ ▐█▌·${RESET}"
-    echo "  ${GREEN}·▀▀▀  ▀█▄▀▪·▀▀█.  ▀▀▀ ▀▀▀·▀▀▀▀  ▀█▄▀▪ ▀▀▀ ${RESET}"
+    echo "  ${GREEN} ▄▄·       .▄▄▄  ▄• ▄▌▪  ${RESET}"
+    echo "  ${GREEN}▐█ ▌▪▪     ▐▀•▀█ █▪██▌██ ${RESET}"
+    echo "  ${GREEN}██ ▄▄ ▄█▀▄ █▌·.█▌█▌▐█▌▐█·${RESET}"
+    echo "  ${GREEN}▐███▌▐█▌.▐▌▐█▪▄█·▐█▄█▌▐█▌${RESET}"
+    echo "  ${GREEN}·▀▀▀  ▀█▄▀▪·▀▀█.  ▀▀▀ ▀▀▀${RESET}"
     echo ""
     echo "  ${BOLD}Coqui Uninstaller${RESET}"
     echo ""
