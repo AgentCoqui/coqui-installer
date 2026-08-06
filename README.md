@@ -10,13 +10,13 @@ The installer downloads the latest GitHub release by default. No Git or Composer
 >
 > Deprecated native Windows scripts remain in the repository for at-risk users only. See [docs/NATIVE-WINDOWS-DEPRECATED.md](docs/NATIVE-WINDOWS-DEPRECATED.md).
 
-### Bash Dev Mode
+### Quick Install (Release)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.sh | bash
 ```
 
-### Windows Bootstrap Dev Mode
+### Windows (WSL2 Bootstrap)
 
 The Windows bootstrap checks for WSL2, offers to install Ubuntu when needed, and then runs the standard Coqui installer inside WSL.
 
@@ -46,7 +46,7 @@ Get-Content install.ps1 | more
 - Installs PHP 8.4+ plus the default Coqui extension set automatically when package-manager support is available
 - Downloads the latest Coqui release from GitHub (pre-built with dependencies)
 - Verifies the download with SHA-256 checksums
-- Adds `coqui` and `coqui-launcher` commands to your PATH
+- Adds the `coqui` command to your PATH
 
 On Windows, the PowerShell bootstrap also checks for WSL2 readiness and then delegates to the bash installer inside your WSL distro.
 
@@ -59,8 +59,6 @@ coqui
 coqui --api-only
 coqui status
 ```
-
-Use `coqui-launcher` when you want the explicit launcher name. It exposes the same launcher-managed modes.
 
 Coqui auto-discovers Composer toolkits and toolkit-provided REPL commands on boot. Install packages with `/space install <package>` or with Composer in your workspace, then restart Coqui to activate newly discovered tools and slash commands.
 
@@ -116,7 +114,7 @@ Install individual components with flags:
 | -------------------- | ----------------------------------------------- |
 | `--install-php`      | Install/check PHP 8.4+ and required extensions  |
 | `--install-composer` | Install/check Composer                          |
-| `--install-coqui`    | Install/update Coqui, create config and symlink |
+| `--install-coqui`    | Install/update Coqui and create symlink         |
 | `--dev`              | Use git clone instead of release download       |
 | `--non-interactive`  | Skip all confirmation prompts (assume yes)      |
 | `--help`, `-h`       | Show usage                                      |
@@ -147,8 +145,8 @@ COQUI_INSTALL_DIR=/opt/coqui bash install.sh
 - Windows 10/11 via WSL2
 - PHP 8.4 or later
 - Core extensions: `dom`, `mbstring`, `pdo_sqlite`, `xml`
-- Recommended extensions: `curl`, `readline`, `zip`
-- Optional extensions: `gd` for bundled image previews
+- Recommended extensions: `curl`, `readline`
+- Optional extensions: `gd` for bundled image previews; `pcntl` and `posix` for background task management (usually built into php-cli on Linux/macOS)
 - [Ollama](https://ollama.com) (recommended for local embeddings)
 
 Additional requirements for `--dev` mode only:
