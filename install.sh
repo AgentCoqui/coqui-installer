@@ -719,9 +719,10 @@ verify_checksum() {
 
     status "Verifying checksum..."
 
+    # Fail closed: a release install always ships a .sha256 sidecar, so a failed
+    # download means the integrity control is unavailable — never install unverified.
     expected_checksum="$(curl -fsSL "$checksum_url" 2>/dev/null)" || {
-        warn "Could not download checksum file. Skipping verification."
-        return 0
+        fatal "Could not download the checksum file from ${checksum_url}. Refusing to install an unverified release."
     }
 
     # The .sha256 file format is: "hash  filename"
@@ -771,15 +772,19 @@ install_release() {
     # Extract — the archive contains a top-level coqui/ directory
     tar -xzf "${tmp_dir}/${archive_name}" -C "$tmp_dir"
 
+    # Guard: the archive must contain a top-level coqui/ directory
+    if [ ! -d "${tmp_dir}/coqui" ]; then
+        fatal "Unexpected archive structure — 'coqui' directory not found in ${archive_name}."
+    fi
+
     # Copy contents from extracted directory into install dir
     cp -a "${tmp_dir}/coqui/." "$COQUI_INSTALL_DIR/"
 
     # Write version marker
     echo "$LATEST_VERSION" > "$COQUI_INSTALL_DIR/.coqui-version"
 
-    # Ensure bin scripts are executable
+    # Ensure the bin script is executable
     chmod +x "$COQUI_INSTALL_DIR/bin/coqui" 2>/dev/null || true
-    chmod +x "$COQUI_INSTALL_DIR/bin/coqui-launcher" 2>/dev/null || true
 
     rm -rf "$tmp_dir"
     trap - EXIT
@@ -822,34 +827,52 @@ update_release() {
 
     verify_checksum "${tmp_dir}/${archive_name}" "$checksum_url"
 
-    # Back up workspace directory
-    if [ -d "$COQUI_INSTALL_DIR/.workspace" ]; then
-        cp -a "$COQUI_INSTALL_DIR/.workspace" "${tmp_dir}/.workspace.bak"
-    fi
+    # User data preserved across updates. These are never deleted, and are
+    # restored last so a customized copy always wins over any default shipped
+    # in the release. `.workspace` holds all runtime state; openclaw.json/.env
+    # are the only user-editable config the installer exposes at the root.
+    local preserve_names=".workspace openclaw.json .env"
+    local name
+
+    # Back up preserved paths (files or directories)
+    for name in $preserve_names; do
+        if [ -e "$COQUI_INSTALL_DIR/$name" ]; then
+            cp -a "$COQUI_INSTALL_DIR/$name" "${tmp_dir}/preserve-${name}"
+        fi
+    done
 
     # Extract new release
     tar -xzf "${tmp_dir}/${archive_name}" -C "$tmp_dir"
 
-    # Remove old files (except user data we already backed up)
+    # Guard: the archive must contain a top-level coqui/ directory
+    if [ ! -d "${tmp_dir}/coqui" ]; then
+        fatal "Unexpected archive structure — 'coqui' directory not found in ${archive_name}."
+    fi
+
+    # Remove the old vendor tree for a clean install, but never the preserved
+    # user data.
     find "$COQUI_INSTALL_DIR" -mindepth 1 -maxdepth 1 \
         ! -name '.workspace' \
+        ! -name 'openclaw.json' \
+        ! -name '.env' \
         -exec rm -rf {} + 2>/dev/null || true
 
     # Install new release
     cp -a "${tmp_dir}/coqui/." "$COQUI_INSTALL_DIR/"
 
-    # Restore user data (overwrite any defaults from new release)
-    if [ -d "${tmp_dir}/.workspace.bak" ]; then
-        mkdir -p "$COQUI_INSTALL_DIR/.workspace"
-        cp -a "${tmp_dir}/.workspace.bak/." "$COQUI_INSTALL_DIR/.workspace/"
-    fi
+    # Restore preserved user data (overwrite any defaults from the new release)
+    for name in $preserve_names; do
+        if [ -e "${tmp_dir}/preserve-${name}" ]; then
+            rm -rf "$COQUI_INSTALL_DIR/$name"
+            cp -a "${tmp_dir}/preserve-${name}" "$COQUI_INSTALL_DIR/$name"
+        fi
+    done
 
     # Write version marker
     echo "$LATEST_VERSION" > "$COQUI_INSTALL_DIR/.coqui-version"
 
-    # Ensure bin scripts are executable
+    # Ensure the bin script is executable
     chmod +x "$COQUI_INSTALL_DIR/bin/coqui" 2>/dev/null || true
-    chmod +x "$COQUI_INSTALL_DIR/bin/coqui-launcher" 2>/dev/null || true
 
     rm -rf "$tmp_dir"
     trap - EXIT
@@ -969,19 +992,16 @@ create_symlink() {
     detect_bin_dir
 
     local target="${COQUI_INSTALL_DIR}/bin/coqui"
-    local launcher_target="${COQUI_INSTALL_DIR}/bin/coqui-launcher"
 
-    # Ensure the public wrapper and explicit launcher are executable
+    # Ensure the public wrapper is executable
     chmod +x "$target"
-    chmod +x "$launcher_target"
 
-    status "Creating command symlinks in ${BIN_DIR}..."
+    status "Creating command symlink in ${BIN_DIR}..."
 
     mkdir -p "$BIN_DIR"
     ln -sf "$target" "$BIN_DIR/coqui"
-    ln -sf "$launcher_target" "$BIN_DIR/coqui-launcher"
 
-    success "Symlinks created: ${BIN_DIR}/coqui, ${BIN_DIR}/coqui-launcher"
+    success "Symlink created: ${BIN_DIR}/coqui"
 
     # Warn if BIN_DIR is not in PATH
     if ! echo "$PATH" | tr ':' '\n' | grep -qx "$BIN_DIR"; then
@@ -1038,10 +1058,6 @@ print_success() {
     echo "    coqui                # Start the full launcher-managed app (REPL + API)"
     echo "    coqui --api-only     # Start only the launcher-managed API"
     echo "    coqui status         # Inspect launcher-managed services"
-    echo ""
-    echo "  ${BOLD}Explicit launcher:${RESET}"
-    echo ""
-    echo "    coqui-launcher       # Same full app entrypoint, explicit launcher name"
     echo ""
     echo "  ${BOLD}Add cloud providers${RESET} (optional):"
     echo ""

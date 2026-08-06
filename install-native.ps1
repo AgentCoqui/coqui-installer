@@ -539,8 +539,9 @@ function Test-Checksum {
             $ExpectedContent = $RawContent -as [string]
         }
     } catch {
-        Write-Warn "Could not download checksum file. Skipping verification."
-        return
+        # Fail closed: a release install always ships a .sha256 sidecar, so a
+        # failed download means the integrity control is unavailable.
+        Write-Fatal "Could not download the checksum file from $ChecksumUrl. Refusing to install an unverified release."
     }
 
     # The .sha256 file format is: "hash  filename"
@@ -638,34 +639,47 @@ function Update-Release {
 
         Test-Checksum -FilePath $ArchivePath -ChecksumUrl $ChecksumUrl
 
-        # Back up user data before replacing
+        # User data preserved across updates. These are never deleted, and are
+        # restored last so a customized copy always wins over any default shipped
+        # in the release. Mirrors the bash installer's allowlist semantics.
         Write-Status "Backing up user data..."
-        $WorkspaceDir = Join-Path $COQUI_INSTALL_DIR ".workspace"
+        $PreserveNames = @(".workspace", "openclaw.json", ".env")
 
-        # Back up workspace directory
-        if (Test-Path $WorkspaceDir) {
-            Copy-Item -Path $WorkspaceDir -Destination (Join-Path $TempDir ".workspace.bak") -Recurse -Force
+        foreach ($Name in $PreserveNames) {
+            $Src = Join-Path $COQUI_INSTALL_DIR $Name
+            if (Test-Path $Src) {
+                Copy-Item -Path $Src -Destination (Join-Path $TempDir "preserve-$Name") -Recurse -Force
+            }
         }
 
         # Extract new release
         Expand-Archive -Path $ArchivePath -DestinationPath $TempDir -Force
 
-        # Install new release
+        # Guard: the archive must contain a top-level coqui/ directory
         $ExtractedDir = Join-Path $TempDir "coqui"
-        if (Test-Path $ExtractedDir) {
-            Copy-Item -Path "$ExtractedDir\*" -Destination $COQUI_INSTALL_DIR -Recurse -Force
+        if (-not (Test-Path $ExtractedDir)) {
+            Write-Fatal "Unexpected archive structure - 'coqui' directory not found."
         }
 
-        # Restore user data (overwrite any defaults from new release)
-        $WorkspaceBackup = Join-Path $TempDir ".workspace.bak"
+        # Remove the old vendor tree for a clean install, but never the
+        # preserved user data.
+        Get-ChildItem -Force -Path $COQUI_INSTALL_DIR | Where-Object {
+            $PreserveNames -notcontains $_.Name
+        } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
-        # Restore workspace if it existed
-        if (Test-Path $WorkspaceBackup) {
-            $WorkspaceDir = Join-Path $COQUI_INSTALL_DIR ".workspace"
-            if (-not (Test-Path $WorkspaceDir)) {
-                New-Item -ItemType Directory -Path $WorkspaceDir -Force | Out-Null
+        # Install new release
+        Copy-Item -Path "$ExtractedDir\*" -Destination $COQUI_INSTALL_DIR -Recurse -Force
+
+        # Restore preserved user data (overwrite any defaults from the new release)
+        foreach ($Name in $PreserveNames) {
+            $Backup = Join-Path $TempDir "preserve-$Name"
+            if (Test-Path $Backup) {
+                $Dest = Join-Path $COQUI_INSTALL_DIR $Name
+                if (Test-Path $Dest) {
+                    Remove-Item -Path $Dest -Recurse -Force -ErrorAction SilentlyContinue
+                }
+                Copy-Item -Path $Backup -Destination $Dest -Recurse -Force
             }
-            Copy-Item -Path "$WorkspaceBackup\*" -Destination $WorkspaceDir -Recurse -Force
         }
 
         # Write version marker
