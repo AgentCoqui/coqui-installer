@@ -12,7 +12,7 @@
 # Windows (WSL2 bootstrap):
 #   irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.ps1 | iex
 
-set -eu
+set -euo pipefail
 
 # ─── Configuration (override via environment variables) ──────────────────────
 
@@ -34,10 +34,10 @@ REQUIRED_PHP_MINOR=4
 REQUIRED_EXTENSIONS="dom mbstring pdo_sqlite xml"
 
 # Recommended extensions for a smooth default install.
-RECOMMENDED_EXTENSIONS="curl readline zip"
+RECOMMENDED_EXTENSIONS="curl readline"
 
-# Optional bundled-feature extensions.
-OPTIONAL_EXTENSIONS="gd"
+# Optional feature extensions (derived from coqui/composer.json "suggest").
+OPTIONAL_EXTENSIONS="gd pcntl posix"
 
 # ─── Mode flags (set via CLI arguments) ──────────────────────────────────────
 
@@ -374,7 +374,10 @@ install_php() {
             echo "    dom, mbstring, pdo_sqlite, xml"
             echo ""
             echo "  Recommended extensions for the default Coqui install:"
-            echo "    curl, readline, zip, gd"
+            echo "    curl, readline, gd"
+            echo ""
+            echo "  On Linux/macOS, pcntl and posix enable background task management"
+            echo "  (usually built into php-cli already)."
             echo ""
             echo "  See: https://www.php.net/manual/en/install.php"
             echo ""
@@ -490,12 +493,12 @@ check_extensions() {
 
     if [ -n "$missing_recommended" ]; then
         warn "Missing recommended PHP extensions:${missing_recommended}"
-        echo "  These improve the default Coqui experience: curl for faster HTTP providers, readline for REPL ergonomics, and zip for office document extraction."
+        echo "  These improve the default Coqui experience: curl for faster HTTP providers and readline for REPL ergonomics."
     fi
 
     if [ -n "$missing_optional" ]; then
         warn "Missing optional PHP extensions:${missing_optional}"
-        echo "  The bundled image toolkit uses gd for low-fidelity REPL previews."
+        echo "  gd powers the bundled image toolkit's low-fidelity REPL previews; pcntl and posix enable background task cancellation and process management (usually built into php-cli on Linux/macOS)."
     fi
 
     if [ -z "$missing_required$missing_recommended$missing_optional" ]; then
@@ -629,28 +632,32 @@ install_composer() {
     local expected_sig
     expected_sig="$(curl -fsSL https://composer.github.io/installer.sig)"
 
-    php -r "copy('https://getcomposer.org/installer', '/tmp/composer-setup.php');"
+    local setup_script
+    setup_script="$(mktemp)"
+
+    # copy() returns false on failure; surface that instead of validating a stale file.
+    if ! php -r "exit(@copy('https://getcomposer.org/installer', '$setup_script') ? 0 : 1);"; then
+        rm -f "$setup_script"
+        fatal "Failed to download the Composer installer."
+    fi
 
     local actual_sig
-    actual_sig="$(php -r "echo hash_file('sha384', '/tmp/composer-setup.php');")"
+    actual_sig="$(php -r "echo hash_file('sha384', '$setup_script');")"
 
     if [ "$expected_sig" != "$actual_sig" ]; then
-        rm -f /tmp/composer-setup.php
+        rm -f "$setup_script"
         fatal "Composer installer signature mismatch. Download may be corrupted."
     fi
 
     status "Installing Composer..."
-    php /tmp/composer-setup.php --quiet
-    rm -f /tmp/composer-setup.php
+    php "$setup_script" --quiet
+    rm -f "$setup_script"
 
-    # Move composer.phar to a directory in PATH
+    # Move composer.phar to a directory in PATH.
+    # detect_bin_dir only ever returns a writable directory, so no sudo is needed.
     detect_bin_dir
-    if [ "$BIN_DIR" = "/usr/local/bin" ] && [ "$(id -u)" -ne 0 ]; then
-        $SUDO mv composer.phar "$BIN_DIR/composer"
-    else
-        mkdir -p "$BIN_DIR"
-        mv composer.phar "$BIN_DIR/composer"
-    fi
+    mkdir -p "$BIN_DIR"
+    mv composer.phar "$BIN_DIR/composer"
 
     success "Composer installed to $BIN_DIR/composer"
 }
