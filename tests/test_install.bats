@@ -338,3 +338,60 @@ INSTALL_SCRIPT="$SCRIPT_DIR/install.sh"
 
     rm -rf "$test_dir" "$stage" "$(dirname "$archive")"
 }
+
+# ─── Docker detection + --native dispatch ─────────────────────────────────────
+
+@test "parse_args accepts --native and sets FORCE_NATIVE" {
+    run bash -c '
+      source <(awk "NR>1 { print prev } { prev=\$0 }" install.sh)
+      parse_args --native
+      echo "FORCE_NATIVE=$FORCE_NATIVE"
+    '
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"FORCE_NATIVE=1"* ]]
+}
+
+@test "docker_available reflects DOCKER_OK" {
+    run bash -c '
+      source <(awk "NR>1 { print prev } { prev=\$0 }" install.sh)
+      DOCKER_OK=1; docker_available && echo yes || echo no
+      DOCKER_OK=0; docker_available && echo yes || echo no
+    '
+    [ "$status" -eq 0 ]
+    [[ "${lines[0]}" == "yes" ]]
+    [[ "${lines[1]}" == "no" ]]
+}
+
+@test "detect_docker sets DOCKER_OK=1 when docker+compose present" {
+    STUB="$(mktemp -d)"
+    cat > "$STUB/docker" <<'EOF'
+#!/bin/sh
+# `docker compose version` succeeds; `docker version` succeeds.
+[ "$1" = "compose" ] && { echo "Docker Compose version v2.29.0"; exit 0; }
+exit 0
+EOF
+    chmod +x "$STUB/docker"
+    # Prepend stub dir so the fake docker wins.
+    PATH="$STUB:$PATH" run bash -c '
+      source <(awk "NR>1 { print prev } { prev=\$0 }" install.sh)
+      detect_docker
+      echo "DOCKER_OK=$DOCKER_OK"
+    '
+    [[ "$output" == *"DOCKER_OK=1"* ]]
+    rm -rf "$STUB"
+}
+
+@test "detect_docker sets DOCKER_OK=0 when docker missing" {
+    # Restrict PATH to a stub dir holding only the tools the sourced script
+    # needs (bash + awk) so a real `docker` on the host cannot be found.
+    STUB="$(mktemp -d)"
+    ln -s "$(command -v bash)" "$STUB/bash"
+    ln -s "$(command -v awk)"  "$STUB/awk"
+    PATH="$STUB" run bash -c '
+      source <(awk "NR>1 { print prev } { prev=\$0 }" install.sh)
+      detect_docker
+      echo "DOCKER_OK=$DOCKER_OK"
+    '
+    [[ "$output" == *"DOCKER_OK=0"* ]]
+    rm -rf "$STUB"
+}

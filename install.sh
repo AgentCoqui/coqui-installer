@@ -49,6 +49,12 @@ QUIET_MODE=false       # true when --quiet is passed (minimal output)
 SELECTIVE_MODE=false   # true when any --install-* flag is passed
 DEV_MODE=false         # true when --dev is passed (git clone instead of release)
 
+# ─── Docker preference (Docker is the primary install path) ──────────────────
+
+FORCE_NATIVE=0         # 1 when --native is passed (skip the Docker path)
+DOCKER_OK=0            # 1 when docker + compose v2 are usable
+DOCKER_NEEDS_SUDO=0    # 1 when docker only works via sudo
+
 # Resolved at runtime
 LATEST_VERSION=""
 
@@ -65,6 +71,8 @@ parse_args() {
                 INSTALL_COQUI=true; SELECTIVE_MODE=true; shift ;;
             --dev)
                 DEV_MODE=true; shift ;;
+            --native)
+                FORCE_NATIVE=1; shift ;;
             --non-interactive)
                 NON_INTERACTIVE=true; shift ;;
             --quiet|-q)
@@ -93,6 +101,7 @@ show_usage() {
     echo "  --install-php          Install/check PHP ${REQUIRED_PHP_MAJOR}.${REQUIRED_PHP_MINOR}+ and extensions"
     echo "  --install-composer     Install/check Composer"
     echo "  --install-coqui        Install/update Coqui and create symlink"
+    echo "  --native               Skip the Docker path; install natively on this host"
     echo "  --dev                  Use git clone instead of release download (for development)"
     echo "  --non-interactive      Skip all confirmation prompts (assume yes)"
     echo "  --quiet, -q            Minimal output (milestones and errors only)"
@@ -265,6 +274,45 @@ detect_os() {
             fatal "Unsupported operating system: $OS. Coqui supports Linux and macOS."
             ;;
     esac
+}
+
+# ─── Docker detection ────────────────────────────────────────────────────────
+
+# Detect Docker Engine + Compose v2. Respects sudo: if docker only works under
+# sudo, DOCKER_OK still becomes 1 but DOCKER_NEEDS_SUDO is set so callers can
+# message the user (never silently sudo).
+detect_docker() {
+    DOCKER_OK=0
+    DOCKER_NEEDS_SUDO=0
+
+    if ! available docker; then
+        return 0
+    fi
+
+    # Does `docker compose` (v2 plugin) exist and does the daemon respond?
+    if docker compose version >/dev/null 2>&1 && docker version >/dev/null 2>&1; then
+        DOCKER_OK=1
+        return 0
+    fi
+
+    # Daemon may require sudo (user not in docker group).
+    if [ -n "${SUDO:-}" ] && $SUDO docker compose version >/dev/null 2>&1 && $SUDO docker version >/dev/null 2>&1; then
+        DOCKER_OK=1
+        # shellcheck disable=SC2034  # consumed by the Docker path (Task 8)
+        DOCKER_NEEDS_SUDO=1
+        return 0
+    fi
+
+    return 0
+}
+
+docker_available() {
+    [ "${DOCKER_OK:-0}" = "1" ]
+}
+
+# Temporary stub — Task 8 replaces the body with the real Docker install.
+install_docker_stack() {
+    fatal "install_docker_stack not yet implemented"
 }
 
 # ─── PHP checks ──────────────────────────────────────────────────────────────
@@ -1088,6 +1136,18 @@ main() {
 
     detect_os
     setup_sudo
+
+    # ── Install-path selection ─────────────────────────────────────────────
+    # Docker is primary. Fall back to native only when forced or unavailable.
+    if [ "${FORCE_NATIVE:-0}" != "1" ]; then
+        detect_docker
+        if docker_available; then
+            install_docker_stack    # implemented in Task 8
+            return 0
+        fi
+        warn "Docker (with 'docker compose') was not found — falling back to the native install."
+        warn "Install Docker for the recommended experience, or pass --native to silence this."
+    fi
 
     # ── Selective mode: run only the requested components ──
     if [ "$SELECTIVE_MODE" = true ]; then
