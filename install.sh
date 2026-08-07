@@ -1,27 +1,27 @@
 #!/usr/bin/env bash
 
 # Coqui Installer
-# https://github.com/AgentCoqui/coqui
+# https://github.com/carmelosantana/coqui
 #
 # Terminal AI agent with multi-model orchestration, persistent sessions,
 # and runtime extensibility via Composer.
 #
 # Install with:
-#   curl -fsSL https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/install.sh | bash
 #
 # Windows (WSL2 bootstrap):
-#   irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/install.ps1 | iex
 
 set -euo pipefail
 
 # ─── Configuration (override via environment variables) ──────────────────────
 
-COQUI_REPO="${COQUI_REPO:-https://github.com/AgentCoqui/coqui.git}"
+COQUI_REPO="${COQUI_REPO:-https://github.com/carmelosantana/coqui.git}"
 COQUI_INSTALL_DIR="${COQUI_INSTALL_DIR:-$HOME/.coqui}"
 COQUI_VERSION="${COQUI_VERSION:-}"
 
 # GitHub release configuration
-COQUI_GITHUB_OWNER="AgentCoqui"
+COQUI_GITHUB_OWNER="carmelosantana"
 COQUI_GITHUB_REPO="coqui"
 COQUI_API_URL="https://api.github.com/repos/${COQUI_GITHUB_OWNER}/${COQUI_GITHUB_REPO}/releases/latest"
 COQUI_DOWNLOAD_BASE="https://github.com/${COQUI_GITHUB_OWNER}/${COQUI_GITHUB_REPO}/releases/download"
@@ -1076,7 +1076,7 @@ print_success() {
     echo "    Make sure Ollama is running:  ollama serve"
     echo "    Pull a model:                 ollama pull glm-4.7-flash"
     echo ""
-    echo "  ${BOLD}Docs:${RESET}  https://github.com/AgentCoqui/coqui"
+    echo "  ${BOLD}Docs:${RESET}  https://github.com/carmelosantana/coqui"
     echo ""
 }
 

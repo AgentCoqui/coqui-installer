@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 
 # Coqui Uninstaller
-# https://github.com/AgentCoqui/coqui
+# https://github.com/carmelosantana/coqui
 #
 # Removes Coqui and optionally PHP/Composer from your system.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/uninstall.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/uninstall.sh | bash
 #
 # Or run locally:
 #   ./uninstall.sh [flags]

@@ -1,6 +1,6 @@
 # Coqui Installer
 
-One liner for [Coqui](https://github.com/AgentCoqui/coqui) — a terminal AI agent with multi-model orchestration.
+One liner for [Coqui](https://github.com/carmelosantana/coqui) — a terminal AI agent with multi-model orchestration.
 
 ## Install
 
@@ -13,7 +13,7 @@ The installer downloads the latest GitHub release by default. No Git or Composer
 ### Quick Install (Release)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/install.sh | bash
 ```
 
 ### Windows (WSL2 Bootstrap)
@@ -21,13 +21,13 @@ curl -fsSL https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/ins
 The Windows bootstrap checks for WSL2, offers to install Ubuntu when needed, and then runs the standard Coqui installer inside WSL.
 
 ```powershell
-irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/install.ps1 | iex
 ```
 
 ### Inspect before running (Linux / macOS / WSL2)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/install.sh -o install.sh
 less install.sh
 bash install.sh
 ```
@@ -35,7 +35,7 @@ bash install.sh
 ### Inspect before running (Windows bootstrap)
 
 ```powershell
-Invoke-WebRequest -Uri https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.ps1 -OutFile install.ps1
+Invoke-WebRequest -Uri https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/install.ps1 -OutFile install.ps1
 Get-Content install.ps1 | more
 .\install.ps1
 ```
@@ -67,11 +67,11 @@ Coqui auto-discovers Composer toolkits and toolkit-provided REPL commands on boo
 Re-run the install command. The installer detects existing installations and updates automatically:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/install.sh | bash
 ```
 
 ```powershell
-irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/install.ps1 | iex
 ```
 
 ## Development Mode
@@ -161,13 +161,13 @@ The uninstaller removes Coqui, its symlinks/wrappers, and PATH entries. By defau
 ### Linux / macOS / WSL2 Uninstall
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/uninstall.sh | bash
+curl -fsSL https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/uninstall.sh | bash
 ```
 
 ### Windows (WSL2 Bootstrap) Uninstall
 
 ```powershell
-irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/uninstall.ps1 | iex
+irm https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/uninstall.ps1 | iex
 ```
 
 ### Uninstall flags

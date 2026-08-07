@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Coqui WSL2 Bootstrap Installer for Windows
-    https://github.com/AgentCoqui/coqui
+    https://github.com/carmelosantana/coqui
 
 .DESCRIPTION
     Installs Coqui using the supported WSL2-based Windows workflow.
@@ -15,7 +15,7 @@
     WSL distro to use. Defaults to Ubuntu.
 
 .EXAMPLE
-    irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.ps1 | iex
+    irm https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/install.ps1 | iex
 
 .EXAMPLE
     .\install.ps1 -Dev
@@ -35,7 +35,7 @@ $script:TARGET_DISTRO = $Distro
 $script:DEV_MODE = $Dev.IsPresent
 $script:QUIET_MODE = $Quiet.IsPresent
 $script:HELP_MODE = $Help.IsPresent
-$script:INSTALL_SCRIPT_URL = if ($env:COQUI_INSTALL_SH_URL) { $env:COQUI_INSTALL_SH_URL } else { "https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.sh" }
+$script:INSTALL_SCRIPT_URL = if ($env:COQUI_INSTALL_SH_URL) { $env:COQUI_INSTALL_SH_URL } else { "https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/install.sh" }
 
 function Write-Status {
     param([string]$Message)
@@ -296,7 +296,7 @@ function Show-Usage {
     Write-Host "Supported Windows install path for Coqui via WSL2."
     Write-Host ""
     Write-Host "One-liner:"
-    Write-Host "  irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.ps1 | iex"
+    Write-Host "  irm https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/install.ps1 | iex"
     Write-Host ""
     Write-Host "Flags:"
     Write-Host "  -Dev                 Clone the git repository inside WSL instead of downloading a release"
@@ -334,6 +334,6 @@ try {
         Write-Err "An unexpected error occurred: $_"
     }
     Write-Host ""
-    Write-Host "  Need help? https://github.com/AgentCoqui/coqui/issues"
+    Write-Host "  Need help? https://github.com/carmelosantana/coqui/issues"
     Write-Host ""
 }

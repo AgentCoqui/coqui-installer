@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
     Coqui Native Windows Installer (Unsupported)
-    https://github.com/AgentCoqui/coqui
+    https://github.com/carmelosantana/coqui
 
 .DESCRIPTION
     Installs PHP and Coqui directly on native Windows.
@@ -34,12 +34,12 @@ $script:HadError = $false
 
 # ─── Configuration (override via environment variables) ──────────────────────
 
-$COQUI_REPO = if ($env:COQUI_REPO) { $env:COQUI_REPO } else { "https://github.com/AgentCoqui/coqui.git" }
+$COQUI_REPO = if ($env:COQUI_REPO) { $env:COQUI_REPO } else { "https://github.com/carmelosantana/coqui.git" }
 $COQUI_INSTALL_DIR = if ($env:COQUI_INSTALL_DIR) { $env:COQUI_INSTALL_DIR } else { Join-Path $env:USERPROFILE ".coqui" }
 $COQUI_VERSION = if ($env:COQUI_VERSION) { $env:COQUI_VERSION } else { "" }
 
 # GitHub release configuration
-$COQUI_GITHUB_OWNER = "AgentCoqui"
+$COQUI_GITHUB_OWNER = "carmelosantana"
 $COQUI_GITHUB_REPO = "coqui"
 $COQUI_API_URL = "https://api.github.com/repos/$COQUI_GITHUB_OWNER/$COQUI_GITHUB_REPO/releases/latest"
 $COQUI_DOWNLOAD_BASE = "https://github.com/$COQUI_GITHUB_OWNER/$COQUI_GITHUB_REPO/releases/download"
@@ -913,7 +913,7 @@ function Print-Success {
     Write-Host "    `$env:OPENAI_API_KEY=`"sk-...`""
     Write-Host "    `$env:ANTHROPIC_API_KEY=`"sk-ant-...`""
     Write-Host ""
-    Write-Host "  Docs:  https://github.com/AgentCoqui/coqui"
+    Write-Host "  Docs:  https://github.com/carmelosantana/coqui"
     Write-Host ""
 }
 
@@ -1015,6 +1015,6 @@ try {
         Write-Err "An unexpected error occurred: $_"
     }
     Write-Host ""
-    Write-Host "  Need help? https://github.com/AgentCoqui/coqui/issues"
+    Write-Host "  Need help? https://github.com/carmelosantana/coqui/issues"
     Write-Host ""
 }
