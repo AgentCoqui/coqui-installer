@@ -52,11 +52,16 @@ jobs:
           git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats-core
           sudo /tmp/bats-core/install.sh /usr/local
 
-      - name: Run install tests
-        run: bats --tap tests/test_install.bats
-
-      - name: Run uninstall tests
-        run: bats --tap tests/test_uninstall.bats
+      - name: Run bats test suites
+        run: |
+          bats --tap tests/test_install.bats
+          bats --tap tests/test_uninstall.bats
+          bats --tap tests/test_wrapper.bats
+          bats --tap tests/test_no_powershell.bats
+          bats --tap tests/test_fetch_coqui.bats
+          bats --tap tests/test_fetch_web.bats
+          bats --tap tests/test_entrypoint.bats
+          bats --tap tests/test_compose.bats
 
 # ─── Bash tests (macOS) ───────────────────────────────────────────────────────
 
@@ -70,11 +75,16 @@ jobs:
       - name: Install bats-core
         run: brew install bats-core
 
-      - name: Run install tests
-        run: bats --tap tests/test_install.bats
-
-      - name: Run uninstall tests
-        run: bats --tap tests/test_uninstall.bats
+      - name: Run bats test suites
+        run: |
+          bats --tap tests/test_install.bats
+          bats --tap tests/test_uninstall.bats
+          bats --tap tests/test_wrapper.bats
+          bats --tap tests/test_no_powershell.bats
+          bats --tap tests/test_fetch_coqui.bats
+          bats --tap tests/test_fetch_web.bats
+          bats --tap tests/test_entrypoint.bats
+          bats --tap tests/test_compose.bats
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
 
