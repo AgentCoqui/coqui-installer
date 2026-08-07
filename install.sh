@@ -310,9 +310,75 @@ docker_available() {
     [ "${DOCKER_OK:-0}" = "1" ]
 }
 
-# Temporary stub — Task 8 replaces the body with the real Docker install.
 install_docker_stack() {
-    fatal "install_docker_stack not yet implemented"
+    status "Setting up the Coqui Docker stack in ${COQUI_INSTALL_DIR}..."
+    mkdir -p "$COQUI_INSTALL_DIR/config"
+
+    local sudo_prefix=""
+    if [ "${DOCKER_NEEDS_SUDO:-0}" = "1" ]; then
+        sudo_prefix="sudo"
+        warn "Docker requires sudo on this machine. The 'coqui' wrapper will run docker with sudo."
+        warn "To avoid this, add your user to the 'docker' group and re-log in."
+    fi
+
+    # Resolve the directory holding the repo's compose.yaml + wrapper. Running
+    # as ./install.sh, BASH_SOURCE points at it; when the script is sourced or
+    # piped (curl | bash) BASH_SOURCE may resolve to a pipe/fd, so fall back to
+    # $PWD — but only when BOTH files are present together, which reliably marks
+    # a real checkout and avoids grabbing an unrelated compose.yaml from cwd.
+    local script_dir=""
+    if [ -n "${BASH_SOURCE:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then
+        script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    fi
+    local src_dir=""
+    if [ -n "$script_dir" ] && [ -f "$script_dir/compose.yaml" ] && [ -f "$script_dir/coqui.wrapper.sh" ]; then
+        src_dir="$script_dir"
+    elif [ -f "$PWD/compose.yaml" ] && [ -f "$PWD/coqui.wrapper.sh" ]; then
+        src_dir="$PWD"
+    fi
+
+    # compose.yaml — copy from repo if present, else download the canonical file.
+    if [ -n "$src_dir" ]; then
+        cp "$src_dir/compose.yaml" "$COQUI_INSTALL_DIR/compose.yaml"
+    else
+        curl -fsSL "https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/compose.yaml" \
+            -o "$COQUI_INSTALL_DIR/compose.yaml" \
+            || fatal "Could not obtain compose.yaml"
+    fi
+
+    # coqui wrapper — same source resolution.
+    [ -z "${BIN_DIR:-}" ] && detect_bin_dir
+    mkdir -p "$BIN_DIR"
+    if [ -n "$src_dir" ]; then
+        cp "$src_dir/coqui.wrapper.sh" "$BIN_DIR/coqui"
+    else
+        curl -fsSL "https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/coqui.wrapper.sh" \
+            -o "$BIN_DIR/coqui" \
+            || fatal "Could not obtain the coqui wrapper"
+    fi
+    chmod +x "$BIN_DIR/coqui"
+
+    # Bake COQUI_HOME + optional sudo into the installed wrapper so it is self-contained.
+    {
+        echo "#!/usr/bin/env bash"
+        echo "export COQUI_HOME=\"$COQUI_INSTALL_DIR\""
+        [ -n "$sudo_prefix" ] && echo "export COQUI_SUDO=\"$sudo_prefix\""
+        tail -n +2 "$BIN_DIR/coqui"
+    } > "$BIN_DIR/coqui.tmp" && mv "$BIN_DIR/coqui.tmp" "$BIN_DIR/coqui"
+    chmod +x "$BIN_DIR/coqui"
+
+    # Pull + start (skipped cleanly if the fake docker in tests is a no-op).
+    status "Pulling the Coqui image and starting the stack..."
+    # shellcheck disable=SC2086  # intentional word-splitting on the sudo prefix
+    ${sudo_prefix} docker compose -f "$COQUI_INSTALL_DIR/compose.yaml" pull || true
+    # shellcheck disable=SC2086  # intentional word-splitting on the sudo prefix
+    ${sudo_prefix} docker compose -f "$COQUI_INSTALL_DIR/compose.yaml" up -d \
+        || fatal "docker compose up failed"
+
+    success "Coqui is running — open http://localhost:8080"
+    if ! echo "$PATH" | tr ':' '\n' | grep -qx "$BIN_DIR"; then
+        warn "${BIN_DIR} is not in your PATH; add it to use the 'coqui' command."
+    fi
 }
 
 # ─── PHP checks ──────────────────────────────────────────────────────────────

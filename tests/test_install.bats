@@ -395,3 +395,24 @@ EOF
     [[ "$output" == *"DOCKER_OK=0"* ]]
     rm -rf "$STUB"
 }
+
+@test "install_docker_stack scaffolds compose + config + wrapper" {
+    STUB="$(mktemp -d)"
+    export COQUI_INSTALL_DIR="$(mktemp -d)/home"
+    export BIN_DIR="$(mktemp -d)/bin"
+    cat > "$STUB/docker" <<'EOF'
+#!/bin/sh
+exit 0
+EOF
+    chmod +x "$STUB/docker"
+    run env PATH="$STUB:$PATH" bash -c '
+      source <(awk "NR>1 { print prev } { prev=\$0 }" install.sh)
+      DOCKER_OK=1; DOCKER_NEEDS_SUDO=0
+      BIN_DIR="'"$BIN_DIR"'"
+      install_docker_stack
+    '
+    [ "$status" -eq 0 ]
+    [ -f "$COQUI_INSTALL_DIR/compose.yaml" ]
+    [ -d "$COQUI_INSTALL_DIR/config" ]
+    [ -x "$BIN_DIR/coqui" ]
+}
