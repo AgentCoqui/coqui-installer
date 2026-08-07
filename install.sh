@@ -870,7 +870,7 @@ update_release() {
     # Restore preserved user data (overwrite any defaults from the new release)
     for name in $preserve_names; do
         if [ -e "${tmp_dir}/preserve-${name}" ]; then
-            rm -rf "$COQUI_INSTALL_DIR/$name"
+            rm -rf "${COQUI_INSTALL_DIR:?}/$name"
             cp -a "${tmp_dir}/preserve-${name}" "$COQUI_INSTALL_DIR/$name"
         fi
     done
