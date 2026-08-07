@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 
 # Coqui Uninstaller
-# https://github.com/AgentCoqui/coqui
+# https://github.com/carmelosantana/coqui
 #
 # Removes Coqui and optionally PHP/Composer from your system.
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/uninstall.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/uninstall.sh | bash
 #
 # Or run locally:
 #   ./uninstall.sh [flags]
 
-set -eu
+set -euo pipefail
 
 # ─── Configuration (override via environment variables) ──────────────────────
 
@@ -224,7 +224,7 @@ remove_symlinks() {
     status "Checking for Coqui command symlinks..."
 
     local found=false
-    local command_names="coqui coqui-launcher"
+    local command_names="coqui"
 
     # Check common bin directories plus anything currently on PATH so custom
     # writable install locations are cleaned up too.
@@ -347,7 +347,9 @@ remove_php() {
             local phpv="${PHP_MAJOR}.${PHP_MINOR}"
             # shellcheck disable=SC2086
             $SUDO apt-get remove -y "php${phpv}-*" 2>/dev/null || true
-            $SUDO apt-get autoremove -y 2>/dev/null || true
+            # `apt-get autoremove` is intentionally NOT run here: it can sweep up
+            # unrelated packages the user still depends on. Suggest it instead.
+            echo "  To also remove now-unused dependencies, run: ${SUDO} apt-get autoremove"
             success "PHP packages removed via apt"
             ;;
         brew)

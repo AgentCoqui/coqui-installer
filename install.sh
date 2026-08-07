@@ -1,27 +1,27 @@
 #!/usr/bin/env bash
 
 # Coqui Installer
-# https://github.com/AgentCoqui/coqui
+# https://github.com/carmelosantana/coqui
 #
 # Terminal AI agent with multi-model orchestration, persistent sessions,
 # and runtime extensibility via Composer.
 #
 # Install with:
-#   curl -fsSL https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/install.sh | bash
 #
 # Windows (WSL2 bootstrap):
-#   irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/install.ps1 | iex
 
-set -eu
+set -euo pipefail
 
 # ─── Configuration (override via environment variables) ──────────────────────
 
-COQUI_REPO="${COQUI_REPO:-https://github.com/AgentCoqui/coqui.git}"
+COQUI_REPO="${COQUI_REPO:-https://github.com/carmelosantana/coqui.git}"
 COQUI_INSTALL_DIR="${COQUI_INSTALL_DIR:-$HOME/.coqui}"
 COQUI_VERSION="${COQUI_VERSION:-}"
 
 # GitHub release configuration
-COQUI_GITHUB_OWNER="AgentCoqui"
+COQUI_GITHUB_OWNER="carmelosantana"
 COQUI_GITHUB_REPO="coqui"
 COQUI_API_URL="https://api.github.com/repos/${COQUI_GITHUB_OWNER}/${COQUI_GITHUB_REPO}/releases/latest"
 COQUI_DOWNLOAD_BASE="https://github.com/${COQUI_GITHUB_OWNER}/${COQUI_GITHUB_REPO}/releases/download"
@@ -34,10 +34,10 @@ REQUIRED_PHP_MINOR=4
 REQUIRED_EXTENSIONS="dom mbstring pdo_sqlite xml"
 
 # Recommended extensions for a smooth default install.
-RECOMMENDED_EXTENSIONS="curl readline zip"
+RECOMMENDED_EXTENSIONS="curl readline"
 
-# Optional bundled-feature extensions.
-OPTIONAL_EXTENSIONS="gd"
+# Optional feature extensions (derived from coqui/composer.json "suggest").
+OPTIONAL_EXTENSIONS="gd pcntl posix"
 
 # ─── Mode flags (set via CLI arguments) ──────────────────────────────────────
 
@@ -374,7 +374,10 @@ install_php() {
             echo "    dom, mbstring, pdo_sqlite, xml"
             echo ""
             echo "  Recommended extensions for the default Coqui install:"
-            echo "    curl, readline, zip, gd"
+            echo "    curl, readline, gd"
+            echo ""
+            echo "  On Linux/macOS, pcntl and posix enable background task management"
+            echo "  (usually built into php-cli already)."
             echo ""
             echo "  See: https://www.php.net/manual/en/install.php"
             echo ""
@@ -490,12 +493,12 @@ check_extensions() {
 
     if [ -n "$missing_recommended" ]; then
         warn "Missing recommended PHP extensions:${missing_recommended}"
-        echo "  These improve the default Coqui experience: curl for faster HTTP providers, readline for REPL ergonomics, and zip for office document extraction."
+        echo "  These improve the default Coqui experience: curl for faster HTTP providers and readline for REPL ergonomics."
     fi
 
     if [ -n "$missing_optional" ]; then
         warn "Missing optional PHP extensions:${missing_optional}"
-        echo "  The bundled image toolkit uses gd for low-fidelity REPL previews."
+        echo "  gd powers the bundled image toolkit's low-fidelity REPL previews; pcntl and posix enable background task cancellation and process management (usually built into php-cli on Linux/macOS)."
     fi
 
     if [ -z "$missing_required$missing_recommended$missing_optional" ]; then
@@ -629,28 +632,32 @@ install_composer() {
     local expected_sig
     expected_sig="$(curl -fsSL https://composer.github.io/installer.sig)"
 
-    php -r "copy('https://getcomposer.org/installer', '/tmp/composer-setup.php');"
+    local setup_script
+    setup_script="$(mktemp)"
+
+    # copy() returns false on failure; surface that instead of validating a stale file.
+    if ! php -r "exit(@copy('https://getcomposer.org/installer', '$setup_script') ? 0 : 1);"; then
+        rm -f "$setup_script"
+        fatal "Failed to download the Composer installer."
+    fi
 
     local actual_sig
-    actual_sig="$(php -r "echo hash_file('sha384', '/tmp/composer-setup.php');")"
+    actual_sig="$(php -r "echo hash_file('sha384', '$setup_script');")"
 
     if [ "$expected_sig" != "$actual_sig" ]; then
-        rm -f /tmp/composer-setup.php
+        rm -f "$setup_script"
         fatal "Composer installer signature mismatch. Download may be corrupted."
     fi
 
     status "Installing Composer..."
-    php /tmp/composer-setup.php --quiet
-    rm -f /tmp/composer-setup.php
+    php "$setup_script" --quiet
+    rm -f "$setup_script"
 
-    # Move composer.phar to a directory in PATH
+    # Move composer.phar to a directory in PATH.
+    # detect_bin_dir only ever returns a writable directory, so no sudo is needed.
     detect_bin_dir
-    if [ "$BIN_DIR" = "/usr/local/bin" ] && [ "$(id -u)" -ne 0 ]; then
-        $SUDO mv composer.phar "$BIN_DIR/composer"
-    else
-        mkdir -p "$BIN_DIR"
-        mv composer.phar "$BIN_DIR/composer"
-    fi
+    mkdir -p "$BIN_DIR"
+    mv composer.phar "$BIN_DIR/composer"
 
     success "Composer installed to $BIN_DIR/composer"
 }
@@ -719,9 +726,10 @@ verify_checksum() {
 
     status "Verifying checksum..."
 
+    # Fail closed: a release install always ships a .sha256 sidecar, so a failed
+    # download means the integrity control is unavailable — never install unverified.
     expected_checksum="$(curl -fsSL "$checksum_url" 2>/dev/null)" || {
-        warn "Could not download checksum file. Skipping verification."
-        return 0
+        fatal "Could not download the checksum file from ${checksum_url}. Refusing to install an unverified release."
     }
 
     # The .sha256 file format is: "hash  filename"
@@ -771,15 +779,19 @@ install_release() {
     # Extract — the archive contains a top-level coqui/ directory
     tar -xzf "${tmp_dir}/${archive_name}" -C "$tmp_dir"
 
+    # Guard: the archive must contain a top-level coqui/ directory
+    if [ ! -d "${tmp_dir}/coqui" ]; then
+        fatal "Unexpected archive structure — 'coqui' directory not found in ${archive_name}."
+    fi
+
     # Copy contents from extracted directory into install dir
     cp -a "${tmp_dir}/coqui/." "$COQUI_INSTALL_DIR/"
 
     # Write version marker
     echo "$LATEST_VERSION" > "$COQUI_INSTALL_DIR/.coqui-version"
 
-    # Ensure bin scripts are executable
+    # Ensure the bin script is executable
     chmod +x "$COQUI_INSTALL_DIR/bin/coqui" 2>/dev/null || true
-    chmod +x "$COQUI_INSTALL_DIR/bin/coqui-launcher" 2>/dev/null || true
 
     rm -rf "$tmp_dir"
     trap - EXIT
@@ -822,34 +834,52 @@ update_release() {
 
     verify_checksum "${tmp_dir}/${archive_name}" "$checksum_url"
 
-    # Back up workspace directory
-    if [ -d "$COQUI_INSTALL_DIR/.workspace" ]; then
-        cp -a "$COQUI_INSTALL_DIR/.workspace" "${tmp_dir}/.workspace.bak"
-    fi
+    # User data preserved across updates. These are never deleted, and are
+    # restored last so a customized copy always wins over any default shipped
+    # in the release. `.workspace` holds all runtime state; openclaw.json/.env
+    # are the only user-editable config the installer exposes at the root.
+    local preserve_names=".workspace openclaw.json .env"
+    local name
+
+    # Back up preserved paths (files or directories)
+    for name in $preserve_names; do
+        if [ -e "$COQUI_INSTALL_DIR/$name" ]; then
+            cp -a "$COQUI_INSTALL_DIR/$name" "${tmp_dir}/preserve-${name}"
+        fi
+    done
 
     # Extract new release
     tar -xzf "${tmp_dir}/${archive_name}" -C "$tmp_dir"
 
-    # Remove old files (except user data we already backed up)
+    # Guard: the archive must contain a top-level coqui/ directory
+    if [ ! -d "${tmp_dir}/coqui" ]; then
+        fatal "Unexpected archive structure — 'coqui' directory not found in ${archive_name}."
+    fi
+
+    # Remove the old vendor tree for a clean install, but never the preserved
+    # user data.
     find "$COQUI_INSTALL_DIR" -mindepth 1 -maxdepth 1 \
         ! -name '.workspace' \
+        ! -name 'openclaw.json' \
+        ! -name '.env' \
         -exec rm -rf {} + 2>/dev/null || true
 
     # Install new release
     cp -a "${tmp_dir}/coqui/." "$COQUI_INSTALL_DIR/"
 
-    # Restore user data (overwrite any defaults from new release)
-    if [ -d "${tmp_dir}/.workspace.bak" ]; then
-        mkdir -p "$COQUI_INSTALL_DIR/.workspace"
-        cp -a "${tmp_dir}/.workspace.bak/." "$COQUI_INSTALL_DIR/.workspace/"
-    fi
+    # Restore preserved user data (overwrite any defaults from the new release)
+    for name in $preserve_names; do
+        if [ -e "${tmp_dir}/preserve-${name}" ]; then
+            rm -rf "${COQUI_INSTALL_DIR:?}/$name"
+            cp -a "${tmp_dir}/preserve-${name}" "$COQUI_INSTALL_DIR/$name"
+        fi
+    done
 
     # Write version marker
     echo "$LATEST_VERSION" > "$COQUI_INSTALL_DIR/.coqui-version"
 
-    # Ensure bin scripts are executable
+    # Ensure the bin script is executable
     chmod +x "$COQUI_INSTALL_DIR/bin/coqui" 2>/dev/null || true
-    chmod +x "$COQUI_INSTALL_DIR/bin/coqui-launcher" 2>/dev/null || true
 
     rm -rf "$tmp_dir"
     trap - EXIT
@@ -969,19 +999,16 @@ create_symlink() {
     detect_bin_dir
 
     local target="${COQUI_INSTALL_DIR}/bin/coqui"
-    local launcher_target="${COQUI_INSTALL_DIR}/bin/coqui-launcher"
 
-    # Ensure the public wrapper and explicit launcher are executable
+    # Ensure the public wrapper is executable
     chmod +x "$target"
-    chmod +x "$launcher_target"
 
-    status "Creating command symlinks in ${BIN_DIR}..."
+    status "Creating command symlink in ${BIN_DIR}..."
 
     mkdir -p "$BIN_DIR"
     ln -sf "$target" "$BIN_DIR/coqui"
-    ln -sf "$launcher_target" "$BIN_DIR/coqui-launcher"
 
-    success "Symlinks created: ${BIN_DIR}/coqui, ${BIN_DIR}/coqui-launcher"
+    success "Symlink created: ${BIN_DIR}/coqui"
 
     # Warn if BIN_DIR is not in PATH
     if ! echo "$PATH" | tr ':' '\n' | grep -qx "$BIN_DIR"; then
@@ -1039,10 +1066,6 @@ print_success() {
     echo "    coqui --api-only     # Start only the launcher-managed API"
     echo "    coqui status         # Inspect launcher-managed services"
     echo ""
-    echo "  ${BOLD}Explicit launcher:${RESET}"
-    echo ""
-    echo "    coqui-launcher       # Same full app entrypoint, explicit launcher name"
-    echo ""
     echo "  ${BOLD}Add cloud providers${RESET} (optional):"
     echo ""
     echo "    export OPENAI_API_KEY=\"sk-...\""
@@ -1053,7 +1076,7 @@ print_success() {
     echo "    Make sure Ollama is running:  ollama serve"
     echo "    Pull a model:                 ollama pull glm-4.7-flash"
     echo ""
-    echo "  ${BOLD}Docs:${RESET}  https://github.com/AgentCoqui/coqui"
+    echo "  ${BOLD}Docs:${RESET}  https://github.com/carmelosantana/coqui"
     echo ""
 }
 

@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
     Coqui WSL2 Bootstrap Uninstaller for Windows
-    https://github.com/AgentCoqui/coqui
+    https://github.com/carmelosantana/coqui
 
 .DESCRIPTION
     Removes a Coqui installation that was installed in the supported WSL2-based
@@ -17,7 +17,7 @@
     WSL distro to use. Defaults to Ubuntu.
 
 .EXAMPLE
-    irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/uninstall.ps1 | iex
+    irm https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/uninstall.ps1 | iex
 #>
 
 param(
@@ -36,7 +36,7 @@ $script:REMOVE_WORKSPACE = $RemoveWorkspace.IsPresent
 $script:FORCE_MODE = $Force.IsPresent
 $script:QUIET_MODE = $Quiet.IsPresent
 $script:HELP_MODE = $Help.IsPresent
-$script:UNINSTALL_SCRIPT_URL = if ($env:COQUI_UNINSTALL_SH_URL) { $env:COQUI_UNINSTALL_SH_URL } else { "https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/uninstall.sh" }
+$script:UNINSTALL_SCRIPT_URL = if ($env:COQUI_UNINSTALL_SH_URL) { $env:COQUI_UNINSTALL_SH_URL } else { "https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/uninstall.sh" }
 
 function Write-Status {
     param([string]$Message)
@@ -220,7 +220,7 @@ function Show-Usage {
     Write-Host "Supported Windows uninstall path for a WSL2-based Coqui install."
     Write-Host ""
     Write-Host "One-liner:"
-    Write-Host "  irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/uninstall.ps1 | iex"
+    Write-Host "  irm https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/uninstall.ps1 | iex"
     Write-Host ""
     Write-Host "Flags:"
     Write-Host "  -RemoveWorkspace     Delete the WSL workspace directory"
@@ -257,6 +257,6 @@ try {
         Write-Err "An unexpected error occurred: $_"
     }
     Write-Host ""
-    Write-Host "  Need help? https://github.com/AgentCoqui/coqui/issues"
+    Write-Host "  Need help? https://github.com/carmelosantana/coqui/issues"
     Write-Host ""
 }

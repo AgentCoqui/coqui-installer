@@ -5,7 +5,7 @@ This document covers the legacy native Windows PowerShell scripts that remain in
 Coqui's supported Windows install path is WSL2. Use the supported bootstrap instead:
 
 ```powershell
-irm https://raw.githubusercontent.com/AgentCoqui/coqui-installer/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/install.ps1 | iex
 ```
 
 ## Status

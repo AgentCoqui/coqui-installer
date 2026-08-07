@@ -1,7 +1,7 @@
 ﻿<#
 .SYNOPSIS
     Coqui Native Windows Uninstaller (Unsupported)
-    https://github.com/AgentCoqui/coqui
+    https://github.com/carmelosantana/coqui
 
 .DESCRIPTION
     Removes Coqui and associated files from a Windows system.
@@ -531,6 +531,6 @@ try {
         Write-Err "An unexpected error occurred: $_"
     }
     Write-Host ""
-    Write-Host "  Need help? https://github.com/AgentCoqui/coqui/issues"
+    Write-Host "  Need help? https://github.com/carmelosantana/coqui/issues"
     Write-Host ""
 }
