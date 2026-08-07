@@ -12,7 +12,7 @@ LABEL org.opencontainers.image.title="coqui" \
 RUN set -eux; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-        ca-certificates curl coreutils \
+        ca-certificates curl coreutils supervisor \
         libpng-dev libjpeg62-turbo-dev libfreetype6-dev \
         libxml2-dev libsqlite3-dev libonig-dev; \
     docker-php-ext-configure gd --with-freetype --with-jpeg; \
@@ -44,3 +44,22 @@ RUN chmod +x /usr/local/bin/fetch-web.sh \
 COPY docker/Caddyfile /etc/caddy/Caddyfile
 
 WORKDIR /srv/coqui
+
+# ── Process supervision, first-run config scaffold, health & entry ──
+COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+COPY docker/openclaw.default.json /srv/defaults/openclaw.default.json
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+ENV COQUI_CONFIG_DIR=/config \
+    COQUI_DATA_DIR=/data \
+    COQUI_DEFAULT_CONFIG=/srv/defaults/openclaw.default.json \
+    CADDY_PORT=8080
+
+EXPOSE 8080
+VOLUME ["/config", "/data"]
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:3300/api/v1/health || exit 1
+
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
