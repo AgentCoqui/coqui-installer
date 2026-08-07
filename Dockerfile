@@ -19,6 +19,9 @@ RUN set -eux; \
     docker-php-ext-install -j"$(nproc)" dom xml pdo_sqlite mbstring gd pcntl posix; \
     rm -rf /var/lib/apt/lists/*
 
+# Caddy reverse proxy (single-origin front for web UI + /api proxy).
+COPY --from=caddy:2 /usr/bin/caddy /usr/bin/caddy
+
 # Assemble the coqui server from its prebuilt release (fail-closed checksum verify).
 COPY docker/fetch-coqui.sh /usr/local/bin/fetch-coqui.sh
 RUN chmod +x /usr/local/bin/fetch-coqui.sh \
@@ -26,5 +29,18 @@ RUN chmod +x /usr/local/bin/fetch-coqui.sh \
 
 # Record the server version so AppVersion reports it at runtime.
 ENV COQUI_VERSION=${COQUI_VERSION}
+
+# Web bundle: fetched by release tag, overridable via WEB_TARBALL_URL, or stubbed for CI.
+ARG COQUI_APP_VERSION=""
+ARG WEB_TARBALL_URL=""
+ARG COQUI_WEB_STUB=""
+LABEL org.opencontainers.image.app_version=${COQUI_APP_VERSION}
+
+COPY docker/fetch-web.sh /usr/local/bin/fetch-web.sh
+RUN chmod +x /usr/local/bin/fetch-web.sh \
+    && COQUI_WEB_STUB="${COQUI_WEB_STUB}" WEB_TARBALL_URL="${WEB_TARBALL_URL}" \
+       /usr/local/bin/fetch-web.sh "${COQUI_APP_VERSION}" /srv/web
+
+COPY docker/Caddyfile /etc/caddy/Caddyfile
 
 WORKDIR /srv/coqui
