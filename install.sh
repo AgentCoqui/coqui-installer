@@ -8,9 +8,6 @@
 #
 # Install with:
 #   curl -fsSL https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/install.sh | bash
-#
-# Windows (WSL2 bootstrap):
-#   irm https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/install.ps1 | iex
 
 set -euo pipefail
 
@@ -135,8 +132,6 @@ show_usage() {
     echo ""
     echo "  # Coqui only (user has PHP already)"
     echo "  ./install.sh --install-coqui"
-    echo ""
-    echo "Windows note: use the PowerShell WSL2 bootstrap or run this script inside WSL2."
 }
 
 # ─── Output helpers ──────────────────────────────────────────────────────────
@@ -1204,8 +1199,11 @@ main() {
     setup_sudo
 
     # ── Install-path selection ─────────────────────────────────────────────
-    # Docker is primary. Fall back to native only when forced or unavailable.
-    if [ "${FORCE_NATIVE:-0}" != "1" ]; then
+    # Docker is primary. Fall back to native when forced (--native), when a
+    # selective --install-* flag is given (you cannot --install-php into a
+    # container, so a selective flag implies the native path), or when Docker
+    # is unavailable.
+    if [ "${FORCE_NATIVE:-0}" != "1" ] && [ "$SELECTIVE_MODE" != true ]; then
         detect_docker
         if docker_available; then
             install_docker_stack    # implemented in Task 8

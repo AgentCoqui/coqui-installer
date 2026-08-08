@@ -24,7 +24,7 @@ case "$cmd" in
     status) compose ps ;;
     stop)   compose stop ;;
     restart) compose restart ;;
-    logs)   shift; compose logs "${@:-}" ;;
+    logs)   shift; compose logs "$@" ;;
     update)
         compose pull
         compose up -d

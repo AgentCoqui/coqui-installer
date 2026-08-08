@@ -14,6 +14,8 @@ Then open <http://localhost:8080>.
 
 The image is `ghcr.io/carmelosantana/coqui`. Config lives in `./config/openclaw.json` (scaffolded on first run); sessions and workspace data persist in the `coqui-data` volume.
 
+> **Security — host-only by default.** The stack binds to `127.0.0.1` (loopback), so it is reachable only from this machine. The API is **unauthenticated**: to expose it on your LAN/server set `COQUI_BIND=0.0.0.0` (e.g. `COQUI_BIND=0.0.0.0 docker compose up -d`) and put it behind your own auth/reverse proxy — anyone who can reach the port can use the API.
+
 ### Model backend (bring your own)
 
 No model runtime ships in the image. The default config points at host Ollama (`host.docker.internal:11434`). Edit `./config/openclaw.json` to point at a remote API provider instead. On Linux, the bundled `compose.yaml` already maps `host.docker.internal` via `host-gateway`.
@@ -88,11 +90,11 @@ COQUI_INSTALL_DIR=/opt/coqui ./install.sh --native
 curl -fsSL https://raw.githubusercontent.com/carmelosantana/coqui-installer/main/uninstall.sh | bash
 ```
 
-Preserves the data volume by default; pass `--remove-workspace` to delete it.
+Preserves persistent data by default; pass `--remove-workspace` to delete it. On the Docker path that deletes the persistent `coqui-data` volume; on the native path it removes `~/.coqui/.workspace`.
 
 | Flag                 | Description                                       |
 | -------------------- | ------------------------------------------------- |
-| `--remove-workspace` | Delete the workspace/data (`~/.coqui/.workspace`) |
+| `--remove-workspace` | Delete persistent data (Docker: the `coqui-data` volume; native: `~/.coqui/.workspace`) |
 | `--force`            | Skip all confirmation prompts                     |
 | `--all`              | Also remove PHP and Composer installed by Coqui   |
 | `--quiet`, `-q`      | Minimal output                                    |

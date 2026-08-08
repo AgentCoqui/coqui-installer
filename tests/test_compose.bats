@@ -7,9 +7,9 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"; COMPOSE="$ROOT/compose.ya
     python3 -c "import yaml; yaml.safe_load(open('$COMPOSE'))"
 }
 
-@test "declares a single coqui service on the ghcr image" {
-    run python3 -c "import yaml; d=yaml.safe_load(open('$COMPOSE')); print(list(d['services']))"
-    [[ "$output" == *"coqui"* ]]
+@test "declares exactly one coqui service on the ghcr image" {
+    run python3 -c "import yaml; d=yaml.safe_load(open('$COMPOSE')); s=list(d['services']); assert len(s)==1 and s==['coqui'], s"
+    [ "$status" -eq 0 ]
     grep -q 'ghcr.io/carmelosantana/coqui' "$COMPOSE"
 }
 
@@ -18,6 +18,10 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"; COMPOSE="$ROOT/compose.ya
     grep -q '/config' "$COMPOSE"
     grep -q '/data' "$COMPOSE"
     grep -q 'restart: unless-stopped' "$COMPOSE"
+}
+
+@test "binds to loopback (127.0.0.1) by default via COQUI_BIND" {
+    grep -qE '"\$\{COQUI_BIND:-127\.0\.0\.1\}:\$\{COQUI_PORT:-8080\}:8080"' "$COMPOSE"
 }
 
 @test "documents host.docker.internal for Linux" {

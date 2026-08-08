@@ -36,9 +36,9 @@ INSTALL_SCRIPT="$SCRIPT_DIR/install.sh"
     echo "$output" | grep -q -- "--non-interactive"
 }
 
-@test "install.sh --help points Windows users to the WSL2 bootstrap" {
+@test "install.sh --help has no PowerShell/WSL bootstrap reference" {
     run bash "$INSTALL_SCRIPT" --help
-    echo "$output" | grep -q "PowerShell WSL2 bootstrap"
+    ! echo "$output" | grep -qiE 'powershell|WSL2 bootstrap|\.ps1'
 }
 
 @test "install.sh declares dom as a required extension" {
@@ -394,6 +394,28 @@ EOF
     '
     [[ "$output" == *"DOCKER_OK=0"* ]]
     rm -rf "$STUB"
+}
+
+@test "a selective --install-* flag skips the Docker path even when Docker is available" {
+    run env INSTALL_SCRIPT="$INSTALL_SCRIPT" bash -c '
+      src=$(mktemp)
+      awk "NR>1 { print prev } { prev=\$0 }" "$INSTALL_SCRIPT" > "$src"
+      source "$src"
+      # Neutralize environment probing so main() reaches the dispatch decision.
+      show_banner() { :; }
+      detect_os() { :; }
+      setup_sudo() { :; }
+      detect_docker() { DOCKER_OK=1; }   # pretend Docker is present + usable
+      install_docker_stack() { echo "DOCKER_PATH_TAKEN"; }
+      # Stub the native selective work so we can observe which path ran.
+      check_php() { echo "NATIVE_PATH_TAKEN"; }
+      check_extensions() { :; }
+      check_opcache() { :; }
+      main --install-php --non-interactive
+    '
+    [ "$status" -eq 0 ]
+    echo "$output" | grep -q "NATIVE_PATH_TAKEN"
+    ! echo "$output" | grep -q "DOCKER_PATH_TAKEN"
 }
 
 @test "install_docker_stack scaffolds compose + config + wrapper" {

@@ -22,6 +22,9 @@ setup() {
 }
 
 @test "CI workflow has no PowerShell jobs" {
-    run grep -iE 'powershell|pwsh|pester|psscriptanalyzer|test-windows' "$REPO_ROOT/.github/workflows/test-installer.yml"
+    # Match only genuine PowerShell indicators. A plain 'powershell' grep would
+    # match the CI line that runs tests/test_no_powershell.bats (the filename
+    # contains "power"+"shell"), so key off real PS tooling/step markers instead.
+    run grep -iE 'pwsh|pester|psscriptanalyzer|lint-powershell|test-windows|shell: *pwsh|Invoke-Pester' "$REPO_ROOT/.github/workflows/test-installer.yml"
     [ "$status" -ne 0 ]
 }
