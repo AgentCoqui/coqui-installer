@@ -2,15 +2,22 @@
 
 setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"; COMPOSE="$ROOT/compose.yaml"; }
 
+# PyYAML ships with python3 on the Linux CI runner but not on the macOS runner;
+# the YAML-parse checks skip cleanly where it is unavailable (the grep-based
+# structural checks below still run everywhere, and Linux CI validates the YAML).
+_have_pyyaml() { python3 -c "import yaml" >/dev/null 2>&1; }
+
 @test "compose.yaml exists and is valid YAML" {
     [ -f "$COMPOSE" ]
+    _have_pyyaml || skip "PyYAML not available"
     python3 -c "import yaml; yaml.safe_load(open('$COMPOSE'))"
 }
 
 @test "declares exactly one coqui service on the ghcr image" {
+    grep -q 'ghcr.io/carmelosantana/coqui' "$COMPOSE"
+    _have_pyyaml || skip "PyYAML not available"
     run python3 -c "import yaml; d=yaml.safe_load(open('$COMPOSE')); s=list(d['services']); assert len(s)==1 and s==['coqui'], s"
     [ "$status" -eq 0 ]
-    grep -q 'ghcr.io/carmelosantana/coqui' "$COMPOSE"
 }
 
 @test "publishes port 8080 and persists config + data" {
