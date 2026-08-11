@@ -7,6 +7,18 @@
 #   else                 -> fetch the release asset for <app_version>
 set -eu
 
+# Portable sha256 of a file (macOS ships `shasum`, not `sha256sum`). Prints the
+# hash only. Returns non-zero if no sha256 tool is available.
+_sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        return 127
+    fi
+}
+
 APP_VERSION="${1:-}"
 DEST="${2:?dest dir required}"
 mkdir -p "$DEST"
@@ -41,13 +53,15 @@ echo "fetch-web: downloading ${URL}"
 curl -fsSL "$URL" -o "${TMP}/web.tar.gz" || { echo "fetch-web: download failed: ${URL}" >&2; exit 1; }
 
 if [ "$VERIFY" = "1" ]; then
-    # Fail closed: require sha256sum and a matching entry in SHA256SUMS.txt.
-    command -v sha256sum >/dev/null 2>&1 || { echo "fetch-web: sha256sum not found — cannot verify web bundle" >&2; exit 1; }
+    # Fail closed: require a sha256 tool and a matching entry in SHA256SUMS.txt.
+    if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+        echo "fetch-web: no sha256 tool (sha256sum or shasum) found — cannot verify web bundle" >&2; exit 1
+    fi
     echo "fetch-web: verifying ${TARBALL_NAME} against ${SUMS_URL}"
     curl -fsSL "$SUMS_URL" -o "${TMP}/SHA256SUMS.txt" || { echo "fetch-web: could not download checksums: ${SUMS_URL}" >&2; exit 1; }
     EXPECTED="$(grep -E "[[:space:]]${TARBALL_NAME}\$" "${TMP}/SHA256SUMS.txt" | awk '{print $1}' | head -1)"
     [ -n "$EXPECTED" ] || { echo "fetch-web: no checksum for ${TARBALL_NAME} in SHA256SUMS.txt" >&2; exit 1; }
-    ACTUAL="$(sha256sum "${TMP}/web.tar.gz" | awk '{print $1}')"
+    ACTUAL="$(_sha256 "${TMP}/web.tar.gz")"
     [ "$EXPECTED" = "$ACTUAL" ] || { echo "fetch-web: checksum mismatch for ${TARBALL_NAME} (expected ${EXPECTED}, got ${ACTUAL})" >&2; exit 1; }
     echo "fetch-web: checksum verified"
 fi

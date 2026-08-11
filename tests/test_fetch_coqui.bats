@@ -13,7 +13,8 @@ setup() {
     mkdir -p "$FIXTURE_DIR/coqui/bin"
     echo '#!/bin/sh' > "$FIXTURE_DIR/coqui/bin/coqui-console"
     ( cd "$FIXTURE_DIR" && tar -czf "$STUB_DIR/coqui.tar.gz" coqui )
-    REAL_HASH="$(sha256sum "$STUB_DIR/coqui.tar.gz" | awk '{print $1}')"
+    # Portable hash (macOS has shasum, not sha256sum).
+    REAL_HASH="$( { command -v sha256sum >/dev/null 2>&1 && sha256sum "$STUB_DIR/coqui.tar.gz" || shasum -a 256 "$STUB_DIR/coqui.tar.gz"; } | awk '{print $1}')"
     export REAL_HASH
 }
 
@@ -52,16 +53,16 @@ EOF
     [[ "$output" == *"Checksum"* ]]
 }
 
-@test "fails closed when sha256sum is unavailable" {
+@test "fails closed when no sha256 tool is available" {
     _write_curl_stub "$REAL_HASH"
-    # Run with a PATH that contains ONLY the stub dir so `command -v sha256sum`
-    # cannot resolve the system binary. `bash` is symlinked in so the script
-    # itself is still reachable and its fail-closed guard actually executes
-    # (otherwise a bare stub-only PATH fails with 127 "bash not found" and the
-    # guard is never reached). The behaviour under test: no sha256sum ⇒ the
-    # script refuses to install and exits non-zero.
+    # Run with a PATH that contains ONLY the stub dir so neither `sha256sum` nor
+    # `shasum` can resolve. `bash` is symlinked in so the script itself is still
+    # reachable and its fail-closed guard actually executes (otherwise a bare
+    # stub-only PATH fails with 127 "bash not found" and the guard is never
+    # reached). The behaviour under test: no sha256 tool ⇒ the script refuses to
+    # install and exits non-zero.
     ln -s "$(command -v bash)" "$STUB_DIR/bash"
     run env PATH="$STUB_DIR" bash "$SCRIPT" 9.9.9 "$DEST_DIR"
     [ "$status" -ne 0 ]
-    [[ "$output" == *"sha256sum not found"* ]]
+    [[ "$output" == *"no sha256 tool"* ]]
 }

@@ -228,7 +228,8 @@ INSTALL_SCRIPT="$SCRIPT_DIR/install.sh"
     local test_dir real_hash
     test_dir="$(mktemp -d)"
     echo "coqui-release-bytes" > "$test_dir/archive.tar.gz"
-    real_hash="$(sha256sum "$test_dir/archive.tar.gz" | awk '{print $1}')"
+    # Portable hash (macOS has shasum, not sha256sum).
+    real_hash="$( { command -v sha256sum >/dev/null 2>&1 && sha256sum "$test_dir/archive.tar.gz" || shasum -a 256 "$test_dir/archive.tar.gz"; } | awk '{print $1}')"
 
     run env INSTALL_SCRIPT="$INSTALL_SCRIPT" REAL_HASH="$real_hash" ARCHIVE="$test_dir/archive.tar.gz" bash -c '
         src=$(mktemp)

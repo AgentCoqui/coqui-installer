@@ -41,7 +41,8 @@ _make_release_stub() {
     ( cd "$WEB_FIX" && tar -czf "$STUB_DIR/web.tar.gz" . )
     local tarname="Coqui-9.9.9-web.tar.gz"
     local hash="$1"
-    [ "$hash" = "GOOD" ] && hash="$(sha256sum "$STUB_DIR/web.tar.gz" | awk '{print $1}')"
+    # Portable hash (macOS has shasum, not sha256sum).
+    [ "$hash" = "GOOD" ] && hash="$( { command -v sha256sum >/dev/null 2>&1 && sha256sum "$STUB_DIR/web.tar.gz" || shasum -a 256 "$STUB_DIR/web.tar.gz"; } | awk '{print $1}')"
     printf '%s  %s\n' "$hash" "$tarname" > "$STUB_DIR/SHA256SUMS.txt"
     cat > "$STUB_DIR/curl" <<EOF
 #!/bin/sh

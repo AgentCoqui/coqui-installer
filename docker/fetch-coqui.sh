@@ -15,9 +15,21 @@ ARCHIVE="coqui-v${VERSION}.tar.gz"
 URL="${BASE}/v${VERSION}/${ARCHIVE}"
 CHECKSUM_URL="${URL}.sha256"
 
-# Fail closed: the integrity control must be available.
-if ! command -v sha256sum >/dev/null 2>&1; then
-    echo "fetch-coqui: sha256sum not found — refusing to install unverified release" >&2
+# Portable sha256 of a file (macOS ships `shasum`, not `sha256sum`). Prints the
+# hash only. Returns non-zero if no sha256 tool is available.
+_sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$1" | awk '{print $1}'
+    else
+        return 127
+    fi
+}
+
+# Fail closed: an integrity tool (sha256sum or shasum) must be available.
+if ! command -v sha256sum >/dev/null 2>&1 && ! command -v shasum >/dev/null 2>&1; then
+    echo "fetch-coqui: no sha256 tool (sha256sum or shasum) found — refusing to install unverified release" >&2
     exit 1
 fi
 
@@ -32,7 +44,7 @@ echo "fetch-coqui: verifying checksum"
 EXPECTED="$(curl -fsSL "$CHECKSUM_URL" 2>/dev/null | awk '{print $1}')" \
     || { echo "fetch-coqui: could not fetch checksum ${CHECKSUM_URL} — refusing unverified install" >&2; exit 1; }
 [ -n "$EXPECTED" ] || { echo "fetch-coqui: empty checksum — refusing unverified install" >&2; exit 1; }
-ACTUAL="$(sha256sum "${TMP}/${ARCHIVE}" | awk '{print $1}')"
+ACTUAL="$(_sha256 "${TMP}/${ARCHIVE}")"
 if [ "$EXPECTED" != "$ACTUAL" ]; then
     echo "fetch-coqui: Checksum mismatch. Expected ${EXPECTED}, got ${ACTUAL}" >&2
     exit 1
