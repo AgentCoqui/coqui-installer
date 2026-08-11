@@ -344,7 +344,7 @@ INSTALL_SCRIPT="$SCRIPT_DIR/install.sh"
 
 @test "parse_args accepts --native and sets FORCE_NATIVE" {
     run bash -c '
-      source <(awk "NR>1 { print prev } { prev=\$0 }" install.sh)
+      src=$(mktemp); awk "NR>1 { print prev } { prev=\$0 }" install.sh > "$src"; source "$src"
       parse_args --native
       echo "FORCE_NATIVE=$FORCE_NATIVE"
     '
@@ -429,7 +429,7 @@ exit 0
 EOF
     chmod +x "$STUB/docker"
     run env PATH="$STUB:$PATH" bash -c '
-      source <(awk "NR>1 { print prev } { prev=\$0 }" install.sh)
+      src=$(mktemp); awk "NR>1 { print prev } { prev=\$0 }" install.sh > "$src"; source "$src"
       DOCKER_OK=1; DOCKER_NEEDS_SUDO=0
       BIN_DIR="'"$BIN_DIR"'"
       install_docker_stack
