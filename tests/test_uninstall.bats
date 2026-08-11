@@ -181,7 +181,7 @@ echo "docker $*" >> "$RECORD"; exit 0
 EOF
     chmod +x "$STUB/docker"; export RECORD="$STUB/record.txt"
     run env PATH="$STUB:$PATH" bash -c '
-      source <(awk "NR>1 { print prev } { prev=\$0 }" uninstall.sh)
+      src=$(mktemp); awk "NR>1 { print prev } { prev=\$0 }" uninstall.sh > "$src"; source "$src"
       BIN_DIR="'"$BIN_DIR"'"
       FORCE_MODE=true; REMOVE_WORKSPACE=false
       uninstall_docker_stack
@@ -203,7 +203,7 @@ echo "docker $*" >> "$RECORD"; exit 0
 EOF
     chmod +x "$STUB/docker"; export RECORD="$STUB/record.txt"
     run env PATH="$STUB:$PATH" bash -c '
-      source <(awk "NR>1 { print prev } { prev=\$0 }" uninstall.sh)
+      src=$(mktemp); awk "NR>1 { print prev } { prev=\$0 }" uninstall.sh > "$src"; source "$src"
       BIN_DIR="'"$BIN_DIR"'"
       FORCE_MODE=true; REMOVE_WORKSPACE=true
       uninstall_docker_stack
