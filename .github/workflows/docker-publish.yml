@@ -1,0 +1,106 @@
+name: Publish Image
+
+# Builds the multi-arch image (linux/amd64 + linux/arm64) and pushes it to
+# ghcr.io/carmelosantana/coqui. The image assembles from prebuilt releases, so
+# the server + app versions are resolved from their latest GitHub releases.
+#
+# NOTE: the first push creates the ghcr package as PRIVATE. To let anyone
+# `docker compose up` without authenticating, make the package public once:
+# GitHub → your profile → Packages → coqui → Package settings → Change visibility.
+# (Owners can always pull a private package after `docker login ghcr.io`.)
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "Dockerfile"
+      - "docker/**"
+      - ".github/workflows/docker-publish.yml"
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      coqui_version:
+        description: "coqui server version (blank = latest release)"
+        required: false
+      coqui_app_version:
+        description: "coqui-app version (blank = latest release)"
+        required: false
+
+concurrency:
+  group: publish-image
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Build + push multi-arch image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve server + app versions
+        id: ver
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IN_SERVER: ${{ github.event.inputs.coqui_version }}
+          IN_APP: ${{ github.event.inputs.coqui_app_version }}
+        run: |
+          resolve() { # $1 = repo
+            curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" \
+              "https://api.github.com/repos/$1/releases/latest" \
+              | grep '"tag_name"' | head -1 \
+              | sed 's/.*"tag_name"[^"]*"\([^"]*\)".*/\1/'
+          }
+          sv="${IN_SERVER}"; [ -n "$sv" ] || sv="$(resolve carmelosantana/coqui)"; sv="${sv#v}"
+          av="${IN_APP}";    [ -n "$av" ] || av="$(resolve carmelosantana/coqui-app)"; av="${av#v}"
+          [ -n "$sv" ] || { echo "could not resolve coqui server version"; exit 1; }
+          [ -n "$av" ] || { echo "could not resolve coqui-app version"; exit 1; }
+          echo "server=$sv" >> "$GITHUB_OUTPUT"
+          echo "app=$av" >> "$GITHUB_OUTPUT"
+          echo "Resolved: server=$sv app=$av"
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Build and push (amd64 + arm64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          build-args: |
+            COQUI_VERSION=${{ steps.ver.outputs.server }}
+            COQUI_APP_VERSION=${{ steps.ver.outputs.app }}
+          tags: |
+            ghcr.io/carmelosantana/coqui:latest
+            ghcr.io/carmelosantana/coqui:${{ steps.ver.outputs.server }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/carmelosantana/coqui-installer
+            org.opencontainers.image.app_version=${{ steps.ver.outputs.app }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          {
+            echo "### Published \`ghcr.io/carmelosantana/coqui\`"
+            echo "- Tags: \`latest\`, \`${{ steps.ver.outputs.server }}\`"
+            echo "- Server: ${{ steps.ver.outputs.server }} · App: ${{ steps.ver.outputs.app }}"
+            echo "- Platforms: linux/amd64, linux/arm64"
+          } >> "$GITHUB_STEP_SUMMARY"
