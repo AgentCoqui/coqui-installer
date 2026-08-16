@@ -9,7 +9,7 @@ setup() { README="$(cd "$BATS_TEST_DIRNAME/.." && pwd)/README.md"; }
 
 @test "README documents the docker compose primary path" {
     grep -q 'docker compose up' "$README"
-    grep -q 'ghcr.io/carmelosantana/coqui' "$README"
+    grep -q 'ghcr.io/carmelosantana/coqui-docker' "$README"
     grep -q 'localhost:8080' "$README"
 }
 
