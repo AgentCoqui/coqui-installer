@@ -6,7 +6,7 @@
 # a remote API provider instead.
 services:
   coqui:
-    image: ghcr.io/carmelosantana/coqui:${COQUI_TAG:-latest}
+    image: ghcr.io/carmelosantana/coqui-docker:${COQUI_TAG:-latest}
     ports:
       # Host-only by default: the stack is reachable at http://localhost:8080 on
       # this machine only. The API is UNAUTHENTICATED, so it is not published to
