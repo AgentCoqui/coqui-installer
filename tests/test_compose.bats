@@ -14,7 +14,7 @@ _have_pyyaml() { python3 -c "import yaml" >/dev/null 2>&1; }
 }
 
 @test "declares exactly one coqui service on the ghcr image" {
-    grep -q 'ghcr.io/carmelosantana/coqui-docker' "$COMPOSE"
+    grep -q 'ghcr.io/carmelosantana/coqui-stack' "$COMPOSE"
     _have_pyyaml || skip "PyYAML not available"
     run python3 -c "import yaml; d=yaml.safe_load(open('$COMPOSE')); s=list(d['services']); assert len(s)==1 and s==['coqui'], s"
     [ "$status" -eq 0 ]

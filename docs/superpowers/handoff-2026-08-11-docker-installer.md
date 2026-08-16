@@ -5,7 +5,7 @@
 ## What shipped
 
 The **Coqui Docker Installer** is merged and released. A single container
-(`ghcr.io/carmelosantana/coqui-docker`) is now the primary install path: coqui CAP API
+(`ghcr.io/carmelosantana/coqui-stack`) is now the primary install path: coqui CAP API
 + Flutter web UI in one image, behind a Caddy single-origin proxy.
 
 - **coqui-installer** [PR #15](https://github.com/carmelosantana/coqui-installer/pull/15) — merged to `main` (`9228838`). Dockerfile (assemble-from-releases, fail-closed sha256), Caddy front (COOP/COEP + `/api/*` → `127.0.0.1:3300`), supervisord (honors the app's `POST /api/v1/server/restart` exit-10), wrapper-free `compose.yaml` (loopback-bound by default), Docker-first `install.sh` + `coqui` wrapper with native `--native` fallback, `uninstall.sh`, all PowerShell/Windows removed, Docker-first README, and CI (build + container smoke).
@@ -15,7 +15,7 @@ The **Coqui Docker Installer** is merged and released. A single container
 
 ## What I'm doing next
 
-- **In flight:** [PR #16](https://github.com/carmelosantana/coqui-installer/pull/16) merged — a **multi-arch (amd64+arm64) ghcr publish workflow** (`docker-publish.yml`). First publish is running now. ⚠️ The ghcr package is created **private** by default — it must be flipped to **public** (Packages → coqui-docker → Package settings) for `docker compose up` to pull without `docker login`.
+- **In flight:** [PR #16](https://github.com/carmelosantana/coqui-installer/pull/16) merged — a **multi-arch (amd64+arm64) ghcr publish workflow** (`docker-publish.yml`). First publish is running now. ⚠️ The ghcr package is created **private** by default — it must be flipped to **public** (Packages → coqui-stack → Package settings) for `docker compose up` to pull without `docker login`.
 - **Then:** confirm the published image pulls + runs on Apple Silicon, and close out installer follow-ups (branch protection to require both `test-installer` + `docker-image` checks; a couple of logged cosmetics).
 
 ## ⚠️ Needs brainstorming with you (new-agent handoff)

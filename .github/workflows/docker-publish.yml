@@ -1,12 +1,12 @@
 name: Publish Image
 
 # Builds the multi-arch image (linux/amd64 + linux/arm64) and pushes it to
-# ghcr.io/carmelosantana/coqui-docker. The image assembles from prebuilt releases, so
+# ghcr.io/carmelosantana/coqui-stack. The image assembles from prebuilt releases, so
 # the server + app versions are resolved from their latest GitHub releases.
 #
 # NOTE: the first push creates the ghcr package as PRIVATE. To let anyone
 # `docker compose up` without authenticating, make the package public once:
-# GitHub → your profile → Packages → coqui-docker → Package settings → Change visibility.
+# GitHub → your profile → Packages → coqui-stack → Package settings → Change visibility.
 # (Owners can always pull a private package after `docker login ghcr.io`.)
 
 on:
@@ -87,8 +87,8 @@ jobs:
             COQUI_VERSION=${{ steps.ver.outputs.server }}
             COQUI_APP_VERSION=${{ steps.ver.outputs.app }}
           tags: |
-            ghcr.io/carmelosantana/coqui-docker:latest
-            ghcr.io/carmelosantana/coqui-docker:${{ steps.ver.outputs.server }}
+            ghcr.io/carmelosantana/coqui-stack:latest
+            ghcr.io/carmelosantana/coqui-stack:${{ steps.ver.outputs.server }}
           labels: |
             org.opencontainers.image.source=https://github.com/carmelosantana/coqui-installer
             org.opencontainers.image.app_version=${{ steps.ver.outputs.app }}
@@ -99,7 +99,7 @@ jobs:
       - name: Summary
         run: |
           {
-            echo "### Published \`ghcr.io/carmelosantana/coqui-docker\`"
+            echo "### Published \`ghcr.io/carmelosantana/coqui-stack\`"
             echo "- Tags: \`latest\`, \`${{ steps.ver.outputs.server }}\`"
             echo "- Server: ${{ steps.ver.outputs.server }} · App: ${{ steps.ver.outputs.app }}"
             echo "- Platforms: linux/amd64, linux/arm64"
