@@ -11,6 +11,15 @@
 		reverse_proxy 127.0.0.1:3300
 	}
 
+	# Bundled-deployment signal for the Flutter web UI. The app fetches this at
+	# boot and, seeing bundled:true, connects to this same origin instead of
+	# asking for a server URL. Hosted deployments serve no config.json, so the
+	# app keeps its normal manual-server behavior there.
+	handle /config.json {
+		header Content-Type application/json
+		respond `{"bundled":true,"apiBaseUrl":"/api/v1"}` 200
+	}
+
 	# Flutter web (built --wasm) — requires cross-origin isolation.
 	handle {
 		root * /srv/web
