@@ -154,6 +154,48 @@ UNINSTALL_SCRIPT="$SCRIPT_DIR/uninstall.sh"
     rm -rf "$bin_dir" "$test_dir"
 }
 
+@test "uninstall.sh scans each bin dir once when it is listed twice" {
+    local test_dir fake_home warn_count
+    test_dir="$(mktemp -d)"
+    fake_home="$(mktemp -d)"
+    echo "1.0.0" > "$test_dir/.coqui-version"
+
+    # ~/.local/bin is scanned both as a default location and as a PATH entry, so
+    # a wrapper living there must still be reported only once.
+    mkdir -p "$fake_home/.local/bin"
+    printf '#!/bin/sh\n' > "$fake_home/.local/bin/coqui"
+    chmod +x "$fake_home/.local/bin/coqui"
+
+    run env COQUI_INSTALL_DIR="$test_dir" HOME="$fake_home" \
+        PATH="$fake_home/.local/bin:/usr/bin:/bin" \
+        bash "$UNINSTALL_SCRIPT" --force --quiet
+    [ "$status" -eq 0 ]
+
+    warn_count="$(printf '%s\n' "$output" | grep -c "not a symlink" || true)"
+    [ "$warn_count" -eq 1 ]
+
+    rm -rf "$test_dir" "$fake_home"
+}
+
+@test "uninstall.sh removes a symlink from a bin dir whose path contains a space" {
+    local test_dir bin_dir
+    test_dir="$(mktemp -d)"
+    bin_dir="$(mktemp -d)/bin dir"
+    mkdir -p "$bin_dir"
+    echo "1.0.0" > "$test_dir/.coqui-version"
+    mkdir -p "$test_dir/bin"
+    touch "$test_dir/bin/coqui"
+    ln -sf "$test_dir/bin/coqui" "$bin_dir/coqui"
+
+    run env COQUI_INSTALL_DIR="$test_dir" PATH="$bin_dir:$PATH" \
+        bash "$UNINSTALL_SCRIPT" --force
+    [ "$status" -eq 0 ]
+    # -L, not -e: a dangling symlink is still a symlink that was not cleaned up.
+    [ ! -L "$bin_dir/coqui" ]
+
+    rm -rf "$bin_dir"
+}
+
 # ─── Quiet mode ───────────────────────────────────────────────────────────────
 
 @test "uninstall.sh --quiet --force suppresses status output" {
