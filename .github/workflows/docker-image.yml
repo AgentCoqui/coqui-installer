@@ -78,7 +78,7 @@ jobs:
           echo "$headers"
           echo "$headers" | grep -iq '^HTTP/.* 200' || { echo "no 200 on /config.json"; exit 1; }
           echo "$headers" | grep -iq 'Content-Type: *application/json' || { echo "config.json not served as JSON"; exit 1; }
-          body="$(curl -fsS http://localhost:8080/config.json | tr -d ' \n')"
+          body="$(curl -fsS http://localhost:8080/config.json | tr -d '\n')"
           echo "$body"
           [ "$body" = '{"bundled":true,"apiBaseUrl":"/api/v1"}' ] || { echo "unexpected config.json body"; exit 1; }
 

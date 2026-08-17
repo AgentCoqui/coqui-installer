@@ -62,6 +62,7 @@ jobs:
           bats --tap tests/test_fetch_web.bats
           bats --tap tests/test_entrypoint.bats
           bats --tap tests/test_compose.bats
+          bats --tap tests/test_caddyfile.bats
 
 # ─── Bash tests (macOS) ───────────────────────────────────────────────────────
 
@@ -85,6 +86,7 @@ jobs:
           bats --tap tests/test_fetch_web.bats
           bats --tap tests/test_entrypoint.bats
           bats --tap tests/test_compose.bats
+          bats --tap tests/test_caddyfile.bats
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
 

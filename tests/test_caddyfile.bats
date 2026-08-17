@@ -12,14 +12,14 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"; CADDYFILE="$ROOT/docker/C
 }
 
 @test "serves the bundled runtime config at /config.json" {
-    grep -q 'handle /config.json' "$CADDYFILE"
-    grep -q '"bundled":true' "$CADDYFILE"
-    grep -q '"apiBaseUrl":"/api/v1"' "$CADDYFILE"
+    grep -q '^[[:space:]]*handle /config\.json' "$CADDYFILE"
+    # Byte-identical body — a stray space anywhere in the JSON must fail here.
+    grep -qF 'respond `{"bundled":true,"apiBaseUrl":"/api/v1"}` 200' "$CADDYFILE"
     grep -q 'Content-Type application/json' "$CADDYFILE"
 }
 
 @test "the /config.json route is declared before the SPA catch-all" {
-    cfg_line="$(grep -n 'handle /config.json' "$CADDYFILE" | head -1 | cut -d: -f1)"
+    cfg_line="$(grep -n '^[[:space:]]*handle /config\.json' "$CADDYFILE" | head -1 | cut -d: -f1)"
     spa_line="$(grep -n 'try_files' "$CADDYFILE" | head -1 | cut -d: -f1)"
     [ -n "$cfg_line" ]
     [ -n "$spa_line" ]
