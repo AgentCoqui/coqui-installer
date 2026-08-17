@@ -12,6 +12,8 @@ docker compose up -d
 
 Then open <http://localhost:8080>.
 
+The container also serves `/config.json`, which is how the bundled web UI discovers it should auto-connect to this server — if you front the container with your own reverse proxy, that path must pass through.
+
 The image is `ghcr.io/carmelosantana/coqui-stack`. Config lives in `./config/openclaw.json` (scaffolded on first run); sessions and workspace data persist in the `coqui-data` volume.
 
 > **Security — host-only by default.** The stack binds to `127.0.0.1` (loopback), so it is reachable only from this machine. The API is **unauthenticated**: to expose it on your LAN/server set `COQUI_BIND=0.0.0.0` (e.g. `COQUI_BIND=0.0.0.0 docker compose up -d`) and put it behind your own auth/reverse proxy — anyone who can reach the port can use the API.

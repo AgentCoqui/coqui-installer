@@ -7,6 +7,7 @@ on:
       - "install.sh"
       - "uninstall.sh"
       - "tests/**"
+      - "docker/**"
       - ".github/workflows/test-installer.yml"
   pull_request:
     branches: ["main"]
@@ -14,6 +15,7 @@ on:
       - "install.sh"
       - "uninstall.sh"
       - "tests/**"
+      - "docker/**"
       - ".github/workflows/test-installer.yml"
 
 concurrency:
@@ -54,14 +56,7 @@ jobs:
 
       - name: Run bats test suites
         run: |
-          bats --tap tests/test_install.bats
-          bats --tap tests/test_uninstall.bats
-          bats --tap tests/test_wrapper.bats
-          bats --tap tests/test_no_powershell.bats
-          bats --tap tests/test_fetch_coqui.bats
-          bats --tap tests/test_fetch_web.bats
-          bats --tap tests/test_entrypoint.bats
-          bats --tap tests/test_compose.bats
+          bats --tap tests/
 
 # ─── Bash tests (macOS) ───────────────────────────────────────────────────────
 
@@ -77,14 +72,7 @@ jobs:
 
       - name: Run bats test suites
         run: |
-          bats --tap tests/test_install.bats
-          bats --tap tests/test_uninstall.bats
-          bats --tap tests/test_wrapper.bats
-          bats --tap tests/test_no_powershell.bats
-          bats --tap tests/test_fetch_coqui.bats
-          bats --tap tests/test_fetch_web.bats
-          bats --tap tests/test_entrypoint.bats
-          bats --tap tests/test_compose.bats
+          bats --tap tests/
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
 

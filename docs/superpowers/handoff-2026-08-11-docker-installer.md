@@ -20,6 +20,13 @@ The **Coqui Docker Installer** is merged and released. A single container
 
 ## ⚠️ Needs brainstorming with you (new-agent handoff)
 
+> **Update — the installer-side half of this gap is CLOSED** by the "Same-Origin Bundled Web"
+> work on `feat/bundled-web-config`: `docker/Caddyfile` now serves
+> `/config.json` → `{"bundled":true,"apiBaseUrl":"/api/v1"}` with
+> `Content-Type: application/json`, so the bundled web UI discovers its
+> co-located server without manual server entry. The item below is kept for
+> historical context.
+
 A real deployment gap surfaced during testing that is **out of installer scope** and needs design work in **coqui-app** (with a likely small Dockerfile/Caddy touch-point):
 
 > In the Docker deployment the web app does **not auto-connect to the co-located server**, and there is **no way to add/modify servers in the web UI** — that server-management UI is **disabled in the web build** (it's fine for the hosted Vercel client, which has no bundled server, but it **breaks the single-container Docker UX**, where the web app should just talk to its own same-origin API at `/api/*`).
