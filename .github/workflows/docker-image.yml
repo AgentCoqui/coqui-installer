@@ -81,6 +81,10 @@ jobs:
           body="$(curl -fsS http://localhost:8080/config.json | tr -d '\n')"
           echo "$body"
           [ "$body" = '{"bundled":true,"apiBaseUrl":"/api/v1"}' ] || { echo "unexpected config.json body"; exit 1; }
+          # 39 is the exact byte count of the contract string above; the body
+          # comparison strips newlines, so this is what catches a stray trailing
+          # newline or any other padding. Update it if the contract ever changes.
+          echo "$headers" | grep -iq 'Content-Length: *39' || { echo "config.json body is not exactly 39 bytes"; exit 1; }
 
       - name: Dump logs on failure
         if: failure()

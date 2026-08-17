@@ -18,7 +18,14 @@ setup() { ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"; CADDYFILE="$ROOT/docker/C
     grep -q 'Content-Type application/json' "$CADDYFILE"
 }
 
-@test "the /config.json route is declared before the SPA catch-all" {
+@test "the /config.json route reads before the SPA catch-all (readability, not correctness)" {
+    # File order is NOT what makes this route win. Caddy sorts `handle` blocks
+    # within a site by path-matcher specificity, and a matcher-less `handle`
+    # sorts last regardless of where it appears — so the exact-path
+    # `handle /config.json` would beat the SPA catch-all even if written below it.
+    # This test guards readability/intent only: the file should read in the order
+    # it is evaluated. The container smoke step in
+    # .github/workflows/docker-image.yml is the actual correctness guard.
     cfg_line="$(grep -n '^[[:space:]]*handle /config\.json' "$CADDYFILE" | head -1 | cut -d: -f1)"
     spa_line="$(grep -n 'try_files' "$CADDYFILE" | head -1 | cut -d: -f1)"
     [ -n "$cfg_line" ]
