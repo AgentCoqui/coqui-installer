@@ -149,22 +149,82 @@ UNINSTALL_SCRIPT="$SCRIPT_DIR/uninstall.sh"
     COQUI_INSTALL_DIR="$test_dir" PATH="$bin_dir:$PATH" run bash "$UNINSTALL_SCRIPT" --force
 
     [ "$status" -eq 0 ]
+    # -L, not -e: the symlink target inside the install dir is deleted by now, so
+    # -e reports "gone" even when the dangling symlink was left behind.
+    [ ! -L "$bin_dir/coqui" ]
 
     rm -f "$bin_dir/coqui"
     rm -rf "$bin_dir" "$test_dir"
 }
 
+@test "uninstall.sh scans each bin dir once when it is listed twice" {
+    local test_dir fake_home warn_count
+    test_dir="$(mktemp -d)"
+    fake_home="$(mktemp -d)"
+    echo "1.0.0" > "$test_dir/.coqui-version"
+
+    # ~/.local/bin is scanned both as a default location and as a PATH entry, so
+    # a wrapper living there must still be reported only once.
+    mkdir -p "$fake_home/.local/bin"
+    printf '#!/bin/sh\n' > "$fake_home/.local/bin/coqui"
+    chmod +x "$fake_home/.local/bin/coqui"
+
+    run env COQUI_INSTALL_DIR="$test_dir" HOME="$fake_home" \
+        PATH="$fake_home/.local/bin:/usr/bin:/bin" \
+        bash "$UNINSTALL_SCRIPT" --force --quiet
+    [ "$status" -eq 0 ]
+
+    warn_count="$(printf '%s\n' "$output" | grep -c "not a symlink" || true)"
+    [ "$warn_count" -eq 1 ]
+
+    rm -rf "$test_dir" "$fake_home"
+}
+
+@test "uninstall.sh removes a symlink from a bin dir whose path contains a space" {
+    local test_dir bin_dir
+    test_dir="$(mktemp -d)"
+    bin_dir="$(mktemp -d)/bin dir"
+    mkdir -p "$bin_dir"
+    echo "1.0.0" > "$test_dir/.coqui-version"
+    mkdir -p "$test_dir/bin"
+    touch "$test_dir/bin/coqui"
+    ln -sf "$test_dir/bin/coqui" "$bin_dir/coqui"
+
+    run env COQUI_INSTALL_DIR="$test_dir" PATH="$bin_dir:$PATH" \
+        bash "$UNINSTALL_SCRIPT" --force
+    [ "$status" -eq 0 ]
+    # -L, not -e: a dangling symlink is still a symlink that was not cleaned up.
+    [ ! -L "$bin_dir/coqui" ]
+
+    rm -rf "$bin_dir"
+}
+
 # ─── Quiet mode ───────────────────────────────────────────────────────────────
 
 @test "uninstall.sh --quiet --force suppresses status output" {
-    local test_dir
+    local test_dir fake_home quiet_lines
     test_dir="$(mktemp -d)"
+    fake_home="$(mktemp -d)"
     echo "1.0.0" > "$test_dir/.coqui-version"
 
-    COQUI_INSTALL_DIR="$test_dir" run bash "$UNINSTALL_SCRIPT" --force --quiet
+    # Sandbox HOME and PATH so the bin directories the uninstaller scans hold no
+    # host-installed `coqui` wrapper. Without this, a real ~/.local/bin/coqui (or
+    # any other PATH entry carrying one) adds warning lines and host state decides
+    # the outcome of this test.
+    run env COQUI_INSTALL_DIR="$test_dir" HOME="$fake_home" PATH="/usr/bin:/bin" \
+        bash "$UNINSTALL_SCRIPT" --force --quiet
     [ "$status" -eq 0 ]
+
+    # `warn` deliberately still prints in quiet mode, and the uninstaller also
+    # scans hardcoded /usr/local/bin and /opt/homebrew/bin, which PATH cannot
+    # sandbox. Drop that warning so only the suppressible output is counted.
+    quiet_lines="$(printf '%s\n' "$output" | grep -vc "not a symlink" || true)"
+
     # Quiet mode should only print the milestone line
-    [ "$(echo "$output" | wc -l)" -le 3 ]
+    [ "$quiet_lines" -eq 1 ]
+    echo "$output" | grep -q "Uninstall complete"
+
+    rm -rf "$test_dir" "$fake_home"
 }
 
 # ─── Docker stack teardown ────────────────────────────────────────────────────
