@@ -246,11 +246,22 @@ remove_symlinks() {
     local command_names="coqui"
 
     # Check common bin directories plus anything currently on PATH so custom
-    # writable install locations are cleaned up too.
+    # writable install locations are cleaned up too. One directory per line, so
+    # paths containing spaces survive, and deduplicated so a directory listed
+    # both here and on PATH (typically ~/.local/bin) is only reported once.
     local bin_dirs
-    bin_dirs="/opt/homebrew/bin /usr/local/bin $HOME/.local/bin $(printf '%s' "$PATH" | tr ':' ' ')"
+    bin_dirs="$(
+        {
+            echo "/opt/homebrew/bin"
+            echo "/usr/local/bin"
+            echo "$HOME/.local/bin"
+            printf '%s\n' "$PATH" | tr ':' '\n'
+        } | awk 'NF && !seen[$0]++'
+    )"
 
-    for dir in $bin_dirs; do
+    local dir
+    while IFS= read -r dir; do
+        [ -n "$dir" ] || continue
         local name
         for name in $command_names; do
             local link="${dir}/${name}"
@@ -269,7 +280,7 @@ remove_symlinks() {
                 warn "Found ${link} but it is not a symlink. Skipping."
             fi
         done
-    done
+    done <<< "$bin_dirs"
 
     if [ "$found" = false ]; then
         status "No Coqui command symlinks found"
