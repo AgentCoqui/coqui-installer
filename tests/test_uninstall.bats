@@ -149,6 +149,9 @@ UNINSTALL_SCRIPT="$SCRIPT_DIR/uninstall.sh"
     COQUI_INSTALL_DIR="$test_dir" PATH="$bin_dir:$PATH" run bash "$UNINSTALL_SCRIPT" --force
 
     [ "$status" -eq 0 ]
+    # -L, not -e: the symlink target inside the install dir is deleted by now, so
+    # -e reports "gone" even when the dangling symlink was left behind.
+    [ ! -L "$bin_dir/coqui" ]
 
     rm -f "$bin_dir/coqui"
     rm -rf "$bin_dir" "$test_dir"
